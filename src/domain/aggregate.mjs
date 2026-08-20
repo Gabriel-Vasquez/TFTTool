@@ -1,5 +1,6 @@
 import { ANALYSIS_VERSION, activeTraits, clusterCompositions, lineupIdentity } from './composition.mjs';
 import { analyzeInteractions } from './interactions.mjs';
+import { isAnalyticItemId } from './normalization.mjs';
 import { scoreByPrevalenceAndPlacement } from './score.mjs';
 
 const increment = (map, key, value = 1) => map.set(key, (map.get(key) || 0) + value);
@@ -49,23 +50,26 @@ export function championDetails(observations) {
     const bestUnits = new Map();
     for (const unit of observation.units) {
       const current = bestUnits.get(unit.id);
-      if (!current || unit.items.length > current.items.length || (unit.items.length === current.items.length && unit.tier > current.tier)) bestUnits.set(unit.id, unit);
+      const itemCount = unit.items.filter(isAnalyticItemId).length;
+      const currentItemCount = current?.items.filter(isAnalyticItemId).length || 0;
+      if (!current || itemCount > currentItemCount || (itemCount === currentItemCount && unit.tier > current.tier)) bestUnits.set(unit.id, unit);
     }
     for (const unit of bestUnits.values()) {
+      const analyticItems = unit.items.filter(isAnalyticItemId);
       if (!champions.has(unit.id)) champions.set(unit.id, { id: unit.id, name: unit.name, samples: 0, itemTotal: 0, stars: new Map(), items: new Map(), itemSlots: new Map(), loadouts: new Map(), combinations: new Map(), observations: [] });
       const champion = champions.get(unit.id);
       champion.samples += 1;
-      champion.itemTotal += unit.items.length;
+      champion.itemTotal += analyticItems.length;
       champion.observations.push(observation);
       increment(champion.stars, unit.tier);
-      new Set(unit.items).forEach((item) => increment(champion.items, item));
+      new Set(analyticItems).forEach((item) => increment(champion.items, item));
       const copies = new Map();
-      for (const item of unit.items) {
+      for (const item of analyticItems) {
         const copy = (copies.get(item) || 0) + 1;
         copies.set(item, copy);
         increment(champion.itemSlots, `${item}::${copy}`);
       }
-      const loadout = [...unit.items].sort();
+      const loadout = [...analyticItems].sort();
       if (loadout.length) increment(champion.loadouts, loadout.join('\u001f'));
       const combinations = new Set();
       for (let left = 0; left < loadout.length; left += 1) for (let right = left + 1; right < loadout.length; right += 1) combinations.add(`${loadout[left]}\u001f${loadout[right]}`);
@@ -166,7 +170,7 @@ export function aggregate(observations, prevalenceWeight = 0.5, { traitBreakpoin
     traitBreakpoints,
     compositions: scoredCompositions,
     interactions: analyzeInteractions(observations, clustered.assignments, scoredCompositions),
-    items: scoreEntities(aggregateEntities(observations, (item) => item.units.flatMap((unit) => unit.items.map((id) => ({ id, context: unit.id }))), observations.length)),
+    items: scoreEntities(aggregateEntities(observations, (item) => item.units.flatMap((unit) => unit.items.filter(isAnalyticItemId).map((id) => ({ id, context: unit.id }))), observations.length)),
     champions: scoreEntities(aggregateEntities(observations, (item) => item.units.map((unit) => ({ id: unit.id, name: unit.name, context: compositionContext(item) })), observations.length)),
     synergies: scoreEntities(aggregateEntities(observations, (item) => activeTraits(item, traitBreakpoints).map((trait) => ({ id: `${trait.id}:${trait.breakpoint}`, name: `${trait.name} ${trait.breakpoint}`, context: compositionContext(item) })), observations.length))
   };

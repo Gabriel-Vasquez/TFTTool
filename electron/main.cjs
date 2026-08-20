@@ -3,6 +3,7 @@ const { join } = require('node:path');
 const { pathToFileURL } = require('node:url');
 const net = require('node:net');
 const { mkdirSync } = require('node:fs');
+const { spawn } = require('node:child_process');
 
 const preferredPort = Number(process.env.TFTTOOL_PORT) || 18473;
 let service;
@@ -36,7 +37,14 @@ async function launch() {
   const port = await availablePort(preferredPort);
   const servicePath = app.isPackaged ? join(app.getAppPath(), 'src', 'server.mjs') : join(__dirname, '..', 'src', 'server.mjs');
   const { startTftServer } = await import(pathToFileURL(servicePath).href);
-  const started = await startTftServer(port, { onShutdown: () => app.quit() });
+  const started = await startTftServer(port, {
+    onShutdown: () => app.quit(),
+    onInstallUpdate: async (installer) => {
+      const update = spawn(installer, ['/S'], { detached: true, stdio: 'ignore', windowsHide: true });
+      update.unref();
+      setTimeout(() => app.quit(), 250);
+    }
+  });
   service = started.server;
   const url = `http://127.0.0.1:${started.port}`;
   serviceUrl = url;

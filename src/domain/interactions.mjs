@@ -1,3 +1,5 @@
+import { isAnalyticItemId } from './normalization.mjs';
+
 export const INTERACTION_ANALYSIS_VERSION = 1;
 
 const average = (values) => values.length ? values.reduce((total, value) => total + value, 0) / values.length : 0;
@@ -39,7 +41,7 @@ function groupBy(values, selector) {
 }
 
 function uniqueItems(observation) {
-  return [...new Set((observation.units || []).flatMap((unit) => unit.items || []))].sort();
+  return [...new Set((observation.units || []).flatMap((unit) => unit.items || []).filter(isAnalyticItemId))].sort();
 }
 
 function leaveOneOut(summary, placement) {

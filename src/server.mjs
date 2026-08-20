@@ -14,6 +14,7 @@ import { importBundledSnapshot } from './persistence/seed.mjs';
 import { RiotClient } from './riot/client.mjs';
 import { MetadataClient } from './riot/metadata.mjs';
 import { SecretStore } from './security/secrets.mjs';
+import { UPDATE_MANIFEST_URL, checkForUpdate, downloadVerifiedUpdate } from './update.mjs';
 
 const publicDirectory = join(import.meta.dirname, '..', 'public');
 const store = new LocalStore(dataDirectory);
@@ -149,7 +150,7 @@ function evidenceFor(url) {
   return matches.sort((a, b) => new Date(b.recordedAt) - new Date(a.recordedAt)).slice(0, 200).map((item) => ({ ...item, compositionId: result.assignments[item.id] }));
 }
 
-export async function createTftServer({ onShutdown = () => {} } = {}) {
+export async function createTftServer({ onShutdown = () => {}, onInstallUpdate = async () => { throw new Error('UPDATE_INSTALL_UNAVAILABLE'); }, updateFetch = fetch, updateManifestUrl = UPDATE_MANIFEST_URL } = {}) {
   await store.load();
   await importBundledSnapshot(store);
   const analysisMigrationRequired = (store.state.version || 1) < 7 || store.state.snapshots.some((snapshot) => snapshot.result?.analysisVersion !== ANALYSIS_VERSION);
@@ -159,16 +160,34 @@ export async function createTftServer({ onShutdown = () => {} } = {}) {
       return { ...snapshot, observations };
     });
     for (const snapshot of store.state.snapshots) snapshot.result = aggregate(snapshot.observations, 0.5, await analysisOptions(snapshot.observations));
-    store.state.version = 8;
+    store.state.version = 9;
     await store.save();
   }
-  else if ((store.state.version || 1) < 8) { store.state.version = 8; await store.save(); }
+  else if ((store.state.version || 1) < 9) { store.state.version = 9; await store.save(); }
+  const appUpdate = { state: 'idle', currentVersion: APP_VERSION, availableVersion: null, downloadedBytes: 0, totalBytes: 0, error: null };
+  const startAppUpdate = () => {
+    if (['checking', 'downloading', 'installing'].includes(appUpdate.state)) return false;
+    Object.assign(appUpdate, { state: 'checking', availableVersion: null, downloadedBytes: 0, totalBytes: 0, error: null });
+    void (async () => {
+      const checked = await checkForUpdate({ currentVersion: APP_VERSION, fetchImpl: updateFetch, manifestUrl: updateManifestUrl });
+      appUpdate.availableVersion = checked.manifest.version;
+      appUpdate.totalBytes = checked.manifest.size;
+      if (!checked.available) { appUpdate.state = 'up_to_date'; return; }
+      appUpdate.state = 'downloading';
+      const installer = await downloadVerifiedUpdate(checked.manifest, join(dataDirectory, 'updates'), { fetchImpl: updateFetch, onProgress: (downloadedBytes) => { appUpdate.downloadedBytes = downloadedBytes; } });
+      appUpdate.state = 'installing';
+      await onInstallUpdate(installer, checked.manifest);
+    })().catch((error) => { appUpdate.state = 'failed'; appUpdate.error = error.message || 'UPDATE_FAILED'; });
+    return true;
+  };
   return createServer(async (request, response) => {
   try {
     const url = new URL(request.url, 'http://127.0.0.1');
     if (['POST', 'PUT', 'DELETE'].includes(request.method) && !trustedLocalMutation(request)) return json(response, 403, { error: 'untrusted_origin' });
     if (request.method === 'GET' && request.url === '/api/health') return json(response, 200, { ok: true, service: 'tfttool' });
-    if (request.method === 'GET' && request.url === '/api/bootstrap') return json(response, 200, { settings: store.state.settings, refresh: job, hasApiKey: Boolean(await secrets.getRiotApiKey()) });
+    if (request.method === 'GET' && request.url === '/api/bootstrap') return json(response, 200, { appVersion: APP_VERSION, settings: store.state.settings, refresh: job, appUpdate, hasApiKey: Boolean(await secrets.getRiotApiKey()) });
+    if (request.method === 'GET' && request.url === '/api/app-update') return json(response, 200, appUpdate);
+    if (request.method === 'POST' && request.url === '/api/app-update') { const started = startAppUpdate(); return json(response, started ? 202 : 409, appUpdate); }
     if (request.method === 'GET' && url.pathname === '/api/analysis') return json(response, 200, analysisFor(url));
     if (request.method === 'GET' && url.pathname === '/api/metadata') { const locale = url.searchParams.get('locale') === 'en_US' ? 'en_US' : 'es_ES'; return json(response, 200, await metadataFor(url.searchParams.get('patch'), locale)); }
     if (request.method === 'GET' && url.pathname === '/api/evidence') return json(response, 200, evidenceFor(url));

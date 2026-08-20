@@ -13,14 +13,15 @@ export async function importBundledSnapshot(store, file = bundledSnapshotFile, m
       if (manifestFile) {
         manifest = JSON.parse(await readFile(manifestFile, 'utf8'));
         if (manifest?.format !== 'tfttool-bundled-data' || manifest.version !== 1 || typeof manifest.snapshotId !== 'string') throw new Error('BUNDLED_SNAPSHOT_MANIFEST_INVALID');
-        if (store.state.bundledSnapshotIds.includes(manifest.snapshotId)) return { imported: false, reason: 'already_seen' };
+        const saved = store.state.snapshots.find((snapshot) => snapshot.id === manifest.snapshotId);
+        if (store.state.bundledSnapshotHashes?.[manifest.snapshotId] === manifest.packSha256 && saved?.observations?.length === manifest.observationCount && saved?.result?.analysisVersion === manifest.analysisVersion) return { imported: false, reason: 'already_verified' };
       }
       const buffer = await readFile(file);
       if (manifest?.packSha256 && createHash('sha256').update(buffer).digest('hex') !== manifest.packSha256) throw new Error('BUNDLED_SNAPSHOT_CHECKSUM_INVALID');
       const pack = parseDataPack(buffer);
       let outcome = { imported: false, reason: 'duplicate' };
       for (const snapshot of pack.snapshots) {
-        const result = await store.importSnapshot(snapshot);
+        const result = manifest?.snapshotId === snapshot.id ? await store.reconcileBundledSnapshot(snapshot, manifest.packSha256) : await store.importSnapshot(snapshot);
         if (result.imported || outcome.reason === 'duplicate') outcome = result;
       }
       await store.updatePortableMetadata(pack.metadata);

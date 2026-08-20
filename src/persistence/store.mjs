@@ -5,13 +5,13 @@ export class LocalStore {
   constructor(directory) {
     this.directory = directory;
     this.file = join(directory, 'state.json');
-    this.state = { version: 8, settings: { language: 'es' }, snapshots: [], portableMetadata: {}, refreshCheckpoint: null, bundledSnapshotIds: [] };
+    this.state = { version: 9, settings: { language: 'es' }, snapshots: [], portableMetadata: {}, refreshCheckpoint: null, bundledSnapshotIds: [], bundledSnapshotHashes: {} };
     this.saveQueue = Promise.resolve();
   }
 
   async load() {
     await mkdir(this.directory, { recursive: true });
-    try { const saved = JSON.parse(await readFile(this.file, 'utf8')); this.state = { ...this.state, ...saved, settings: { ...this.state.settings, ...(saved.settings || {}) } }; } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    try { const saved = JSON.parse(await readFile(this.file, 'utf8')); this.state = { ...this.state, ...saved, settings: { ...this.state.settings, ...(saved.settings || {}) }, bundledSnapshotHashes: { ...this.state.bundledSnapshotHashes, ...(saved.bundledSnapshotHashes || {}) } }; } catch (error) { if (error.code !== 'ENOENT') throw error; }
     return this.state;
   }
 
@@ -46,6 +46,25 @@ export class LocalStore {
     await this.save();
     return { imported: true, reason: 'newer' };
   }
+  async reconcileBundledSnapshot(snapshot, packSha256) {
+    if (!snapshot || typeof snapshot.id !== 'string' || !snapshot.id || !Number.isFinite(Date.parse(snapshot.createdAt)) || !Array.isArray(snapshot.observations) || snapshot.observations.length === 0 || !snapshot.result || snapshot.sufficiency?.publishable !== true) {
+      throw new Error('BUNDLED_SNAPSHOT_INVALID');
+    }
+    const existingIndex = this.state.snapshots.findIndex((saved) => saved.id === snapshot.id);
+    if (existingIndex >= 0) {
+      this.state.snapshots[existingIndex] = snapshot;
+      if (!this.state.bundledSnapshotIds.includes(snapshot.id)) this.state.bundledSnapshotIds.push(snapshot.id);
+      this.state.bundledSnapshotHashes[snapshot.id] = packSha256;
+      await this.save();
+      return { imported: false, reason: 'reconciled' };
+    }
+    const result = await this.importSnapshot(snapshot);
+    if (result.imported) {
+      this.state.bundledSnapshotHashes[snapshot.id] = packSha256;
+      await this.save();
+    }
+    return result;
+  }
   async deleteSnapshot(id) { this.state.snapshots = this.state.snapshots.filter((snapshot) => snapshot.id !== id); await this.save(); }
   async deleteAllSnapshots() { this.state.snapshots = []; await this.save(); }
   async importPortableData({ snapshots, metadata }) {
@@ -53,7 +72,7 @@ export class LocalStore {
     const existingIds = new Set(this.state.snapshots.map((snapshot) => snapshot.id));
     const additions = snapshots.filter((snapshot) => !existingIds.has(snapshot.id));
     const mergedSnapshots = [...this.state.snapshots, ...additions].sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt) || left.id.localeCompare(right.id));
-    this.state = { ...this.state, version: 8, snapshots: mergedSnapshots, portableMetadata: { ...this.state.portableMetadata, ...metadata }, refreshCheckpoint: null };
+    this.state = { ...this.state, version: 9, snapshots: mergedSnapshots, portableMetadata: { ...this.state.portableMetadata, ...metadata }, refreshCheckpoint: null };
     try { await this.save(); }
     catch (error) { this.state = previous; throw error; }
     return {

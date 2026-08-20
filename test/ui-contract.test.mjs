@@ -95,6 +95,31 @@ test('portable data controls export and atomically import one tftpack without a 
   assert.doesNotMatch(app.slice(app.indexOf('async function importDataPack'), app.indexOf('function count')), /api\/refresh/);
 });
 
+test('settings opens as a floating dialog with a verified application updater', async () => {
+  const [html, app, css, launcher] = await Promise.all([
+    readFile(join(root, 'public', 'index.html'), 'utf8'),
+    readFile(join(root, 'public', 'app.js'), 'utf8'),
+    readFile(join(root, 'public', 'app.css'), 'utf8'),
+    readFile(join(root, 'electron', 'main.cjs'), 'utf8')
+  ]);
+  assert.match(html, /<dialog id="settings-dialog"/);
+  assert.match(app, /button\.dataset\.tab === 'settings'.*openSettings/);
+  assert.match(app, /data-app-update/);
+  assert.match(app, /api\('\/api\/app-update'.*method: 'POST'/);
+  assert.match(css, /\.settings-dialog\{/);
+  assert.match(launcher, /spawn\(installer, \['\/S'\]/);
+});
+
+test('one and two-star badges are muted while three-star badges remain prominent', async () => {
+  const [app, css] = await Promise.all([
+    readFile(join(root, 'public', 'app.js'), 'utf8'),
+    readFile(join(root, 'public', 'app.css'), 'utf8')
+  ]);
+  assert.match(app, /star-level star-\$\{modal\}/);
+  assert.match(css, /\.star-level\.star-1,\.star-level\.star-2/);
+  assert.match(css, /\.star-level\.star-3/);
+});
+
 test('variant delta columns use symmetrical fixed geometry', async () => {
   const css = await readFile(join(root, 'public', 'app.css'), 'utf8');
   assert.match(css, /grid-template-columns:240px 24px 240px/);

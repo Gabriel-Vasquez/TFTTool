@@ -3,7 +3,7 @@ import { writeFile } from 'node:fs/promises';
 const [debugPort, expectedUrl, screenshotPath] = process.argv.slice(2);
 if (!debugPort || !expectedUrl) throw new Error('Usage: node scripts/qa-electron-cdp.mjs <debug-port> <expected-url> [screenshot-path]');
 
-const deadline = Date.now() + 30_000;
+let deadline = Date.now() + 30_000;
 let target;
 while (Date.now() < deadline) {
   try {
@@ -41,10 +41,13 @@ function command(method, params = {}) {
   });
 }
 
+await command('Runtime.evaluate', { expression: `document.querySelector('#settings-dialog')?.close(); document.querySelector('[data-tab="home"]')?.click()` });
+
 let state;
+deadline = Date.now() + 30_000;
 while (Date.now() < deadline) {
   const evaluated = await command('Runtime.evaluate', {
-    expression: `({ title: document.title, ready: document.readyState, cards: document.querySelectorAll('.comp-card').length, text: document.body?.innerText || '', width: document.documentElement.scrollWidth, viewport: document.documentElement.clientWidth })`,
+    expression: `({ title: document.title, ready: document.readyState, cards: document.querySelectorAll('.comp-card').length, text: document.body?.innerText || '', observations: document.querySelector('.snapshot-meta .metric strong')?.textContent, mutedStars: document.querySelectorAll('.star-level.star-1, .star-level.star-2').length, prominentStars: document.querySelectorAll('.star-level.star-3').length, width: document.documentElement.scrollWidth, viewport: document.documentElement.clientWidth })`,
     returnByValue: true
   });
   state = evaluated.result.value;
@@ -53,10 +56,12 @@ while (Date.now() < deadline) {
 }
 
 if (!state?.title?.startsWith('TFTTool') || state.cards !== 25 || !/Meta actual|Current meta/.test(state.text)) throw new Error(`Unexpected standalone window state: ${JSON.stringify(state)}`);
+if (!/^12[.,]000$/.test(state.observations) || state.mutedStars < 1 || state.prominentStars < 1) throw new Error(`Expected canonical observations and differentiated star badges: ${JSON.stringify(state)}`);
 if (state.width > state.viewport) throw new Error(`Standalone window has horizontal overflow: ${state.width} > ${state.viewport}`);
 
 await command('Runtime.evaluate', { expression: `document.querySelector('[data-composition-id="core:TFT17_MissFortune+TFT17_Ornn+TFT17_Viktor"]')?.click()` });
 let visibleVariants = 0;
+deadline = Date.now() + 30_000;
 while (Date.now() < deadline) {
   const evaluated = await command('Runtime.evaluate', { expression: `document.querySelectorAll('.variant-list .variant').length`, returnByValue: true });
   visibleVariants = evaluated.result.value;
@@ -65,18 +70,23 @@ while (Date.now() < deadline) {
 }
 if (visibleVariants !== 12) throw new Error(`Expected 12 visible Miss Fortune variants, found ${visibleVariants}.`);
 
+await command('Runtime.evaluate', { expression: `document.querySelector('[data-tab="items"]')?.click()` });
+const invalidItems = (await command('Runtime.evaluate', { expression: `document.querySelectorAll('[data-detail-id*="AnimaSquadItem_Tier"], [data-detail-id$="_EmptyBag"]').length`, returnByValue: true })).result.value;
+if (invalidItems !== 0) throw new Error(`Expected special progression and placeholder items to be excluded, found ${invalidItems}.`);
+
 await command('Runtime.evaluate', { expression: `document.querySelector('[data-tab="settings"]')?.click()` });
 let controls;
+deadline = Date.now() + 30_000;
 while (Date.now() < deadline) {
   const evaluated = await command('Runtime.evaluate', {
-    expression: `({ update: document.querySelectorAll('#update').length, importData: document.querySelectorAll('[data-import-pack]').length, exportData: document.querySelectorAll('[data-export-pack]').length })`,
+    expression: `({ dataUpdate: document.querySelectorAll('#update').length, appUpdate: document.querySelectorAll('[data-app-update]').length, importData: document.querySelectorAll('[data-import-pack]').length, exportData: document.querySelectorAll('[data-export-pack]').length, settingsDialogOpen: document.querySelector('#settings-dialog')?.open === true })`,
     returnByValue: true
   });
   controls = evaluated.result.value;
-  if (controls.update === 1 && controls.importData === 1 && controls.exportData === 1) break;
+  if (controls.dataUpdate === 1 && controls.appUpdate === 1 && controls.importData === 1 && controls.exportData === 1 && controls.settingsDialogOpen) break;
   await new Promise((resolve) => setTimeout(resolve, 100));
 }
-if (controls?.update !== 1 || controls.importData !== 1 || controls.exportData !== 1) throw new Error(`Expected Update, Import data, and Export data controls: ${JSON.stringify(controls)}`);
+if (controls?.dataUpdate !== 1 || controls.appUpdate !== 1 || controls.importData !== 1 || controls.exportData !== 1 || !controls.settingsDialogOpen) throw new Error(`Expected floating settings and all update/data controls: ${JSON.stringify(controls)}`);
 
 if (screenshotPath) {
   const capture = await command('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
@@ -84,5 +94,5 @@ if (screenshotPath) {
 }
 
 socket.close();
-console.log(JSON.stringify({ ok: true, targetType: target.type, url: target.url, title: state.title, cards: state.cards, visibleVariants, controls, horizontalOverflow: false }));
+console.log(JSON.stringify({ ok: true, targetType: target.type, url: target.url, title: state.title, observations: state.observations, cards: state.cards, mutedStars: state.mutedStars, prominentStars: state.prominentStars, visibleVariants, invalidItems, controls, horizontalOverflow: false }));
 process.exit(0);

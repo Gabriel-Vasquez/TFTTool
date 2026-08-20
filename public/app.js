@@ -1,6 +1,6 @@
 import { buildTeamCode } from './team-code.js';
 
-const state = { tab: 'home', bootstrap: null, analysis: null, history: null, metadata: null, search: '', region: 'GLOBAL', weight: 50, snapshotId: null, keyPrompted: false, pollTimer: null, dataPackStatus: '', copyStatus: '', expandedCompositions: new Set(), expandedInteractions: new Set() };
+const state = { tab: 'home', bootstrap: null, analysis: null, history: null, metadata: null, search: '', region: 'GLOBAL', weight: 50, snapshotId: null, keyPrompted: false, pollTimer: null, updatePollTimer: null, dataPackStatus: '', copyStatus: '', expandedCompositions: new Set(), expandedInteractions: new Set() };
 const copy = {
   es: { home: 'Meta actual', homeNav: 'Meta', items: 'Objetos', champions: 'Campeones', synergies: 'Sinergias', interactions: 'Interacciones', history: 'Historial', settings: 'Ajustes', eyebrow: 'ANÁLISIS DE ÉLITE', globalRegions: 'Global · todas las regiones', update: 'Actualizar datos', establishedMeta: 'Meta establecido', performance: 'Rendimiento', noData: 'Aún no hay una instantánea de meta', noDataDetail: 'Añade tu clave de Riot Games y pulsa Actualizar datos. El análisis usa exclusivamente partidas clasificatorias recientes y datos oficiales.', configure: 'Configurar clave de Riot', observations: 'observaciones', average: 'Posición media', top4: 'Top 4', win: 'Victoria', score: 'Puntuación meta', prevalence: 'Prevalencia', variants: 'variantes', patch: 'Parche', updated: 'Actualizado', compositions: 'Composiciones', noResults: 'Sin resultados', noResultsDetail: 'No hay resultados para el filtro actual.', evidence: 'EVIDENCIA Y DESGLOSE', sourceGames: 'Partidas fuente', officialIntegration: 'INTEGRACIÓN OFICIAL', riotKey: 'Clave de Riot Games', keySafety: 'Se cifra localmente para tu cuenta de Windows. Nunca se envía fuera de Riot ni se guarda en el repositorio.', saveRefresh: 'Guardar y actualizar', closeServer: 'Cerrar TFTTool', language: 'Idioma', preferences: 'PREFERENCIAS LOCALES', searchPlaceholder: 'Buscar campeones, objetos, sinergias o interacciones', expand: 'Ver variantes', collapse: 'Ocultar variantes' },
   en: { home: 'Current meta', homeNav: 'Meta', items: 'Items', champions: 'Champions', synergies: 'Synergies', interactions: 'Team Interactions', history: 'History', settings: 'Settings', eyebrow: 'ELITE ANALYSIS', globalRegions: 'Global · all regions', update: 'Update data', establishedMeta: 'Established meta', performance: 'Performance', noData: 'No meta snapshot yet', noDataDetail: 'Add your Riot Games key and press Update data. Analysis uses only recent ranked games and official data.', configure: 'Configure Riot key', observations: 'observations', average: 'Average placement', top4: 'Top 4', win: 'Win rate', score: 'Meta score', prevalence: 'Prevalence', variants: 'variants', patch: 'Patch', updated: 'Updated', compositions: 'Compositions', noResults: 'No results', noResultsDetail: 'There are no results for the current filter.', evidence: 'EVIDENCE AND BREAKDOWN', sourceGames: 'Source games', officialIntegration: 'OFFICIAL INTEGRATION', riotKey: 'Riot Games key', keySafety: 'It is encrypted locally for your Windows account. It is never sent anywhere except Riot or stored in the repository.', saveRefresh: 'Save and update', closeServer: 'Close TFTTool', language: 'Language', preferences: 'LOCAL PREFERENCES', searchPlaceholder: 'Search champions, items, traits, or interactions', expand: 'Show variants', collapse: 'Hide variants' }
@@ -35,7 +35,7 @@ function championTile(champion, { core = false, showName = false, hideItems = fa
   const itemIcons = !hideItems && items.length ? `<span class="champion-items">${items.map((item) => icon('items', item.id, 'champion-item', Number.isFinite(item.prevalence) ? `${percent(item.prevalence)} · ${number.format(item.count || 0)} / ${number.format(item.sampleSize || champion.sampleSize || 0)} ${text('observations')}` : '')).join('')}</span>` : '';
   const name = showName ? `<span class="champion-name">${escapeHtml(metadata('champions', champion.id).name)}</span>` : '';
   const interaction = contextId ? ` role="button" tabindex="0" data-composition-champion="${escapeHtml(champion.id)}" data-composition-context="${escapeHtml(contextId)}"` : '';
-  return `<span class="champion-tile${core ? ' core-champion' : ''}${contextId ? ' contextual-champion' : ''}"${interaction}>${icon('champions', champion.id, 'champion-portrait', [`${modal}★`, averageItems, Number.isFinite(champion.presence) ? `${percent(champion.presence)} ${language() === 'es' ? 'presencia' : 'presence'}` : ''].filter(Boolean).join(' · '))}<b class="star-level">${modal}★</b>${itemIcons}${name}</span>`;
+  return `<span class="champion-tile${core ? ' core-champion' : ''}${contextId ? ' contextual-champion' : ''}"${interaction}>${icon('champions', champion.id, 'champion-portrait', [`${modal}★`, averageItems, Number.isFinite(champion.presence) ? `${percent(champion.presence)} ${language() === 'es' ? 'presencia' : 'presence'}` : ''].filter(Boolean).join(' · '))}<b class="star-level star-${modal}">${modal}★</b>${itemIcons}${name}</span>`;
 }
 function patchLabel(value) { return String(value || '').match(/\b\d+\.\d+\b/)?.[0] || value || '—'; }
 function setLabel(value) { return String(value || '').match(/\d+/)?.[0] || value || '—'; }
@@ -137,7 +137,10 @@ function interactionsView(snapshot) {
 function settings() {
   const description = language() === 'es' ? 'El idioma, los datos y todo el historial se guardan localmente. Tu clave de Riot Games se protege para tu cuenta de Windows y nunca se añade al repositorio.' : 'Language, data, and all history are stored locally. Your Riot Games key is protected for your Windows account and is never added to the repository.';
   const dataDescription = language() === 'es' ? 'Comparte instantáneas y metadatos en un único archivo verificado. Las claves de Riot y tus preferencias locales nunca se incluyen.' : 'Share snapshots and metadata in one verified file. Riot keys and local preferences are never included.';
-  return `<section class="settings-card"><p class="eyebrow">${text('preferences')}</p><h2>${text('settings')}</h2><p>${description}</p><label>${text('language')} <select id="language"><option value="es" ${language() === 'es' ? 'selected' : ''}>Español</option><option value="en" ${language() === 'en' ? 'selected' : ''}>English</option></select></label><div class="settings-actions"><button class="primary" data-open-key>${state.bootstrap.hasApiKey ? (language() === 'es' ? 'Actualizar clave de Riot' : 'Update Riot key') : text('configure')}</button><button class="danger" data-shutdown>${text('closeServer')}</button></div><section class="data-pack-card"><p class="eyebrow">${language() === 'es' ? 'DATOS PORTÁTILES' : 'PORTABLE DATA'}</p><h3>${language() === 'es' ? 'TFTTool Data Pack' : 'TFTTool Data Pack'}</h3><p>${dataDescription}</p><div class="settings-actions"><button class="primary" data-export-pack>${language() === 'es' ? 'Exportar datos' : 'Export data'}</button><button class="secondary" data-import-pack>${language() === 'es' ? 'Importar datos' : 'Import data'}</button><input class="hidden" id="data-pack-input" type="file" accept=".tftpack,application/vnd.tfttool.pack"></div>${state.dataPackStatus ? `<p class="data-pack-status">${escapeHtml(state.dataPackStatus)}</p>` : ''}</section><p class="legal">TFTTool isn't endorsed by Riot Games and doesn't reflect the views or opinions of Riot Games or anyone officially involved in producing or managing Riot Games properties. Riot Games, and all associated properties are trademarks or registered trademarks of Riot Games, Inc.</p></section>`;
+  const update = state.bootstrap.appUpdate || { state: 'idle', currentVersion: state.bootstrap.appVersion || '—' };
+  const active = ['checking', 'downloading', 'installing'].includes(update.state);
+  const updateStatus = update.state === 'checking' ? (language() === 'es' ? 'Buscando una versión nueva…' : 'Checking for a new version…') : update.state === 'downloading' ? (language() === 'es' ? `Descargando actualización… ${percent(update.totalBytes ? update.downloadedBytes / update.totalBytes : 0)}` : `Downloading update… ${percent(update.totalBytes ? update.downloadedBytes / update.totalBytes : 0)}`) : update.state === 'installing' ? (language() === 'es' ? 'Instalador verificado. TFTTool se reiniciará para aplicar la actualización.' : 'Installer verified. TFTTool will restart to apply the update.') : update.state === 'up_to_date' ? (language() === 'es' ? 'TFTTool está actualizado.' : 'TFTTool is up to date.') : update.state === 'failed' ? `${language() === 'es' ? 'No se pudo actualizar' : 'Update failed'}: ${update.error}` : (language() === 'es' ? 'Las actualizaciones se descargan desde la versión estable publicada en GitHub y se verifican con SHA-256.' : 'Updates come from the stable GitHub release and are verified with SHA-256.');
+  return `<section class="settings-card"><p class="eyebrow">${text('preferences')}</p><h2>${text('settings')}</h2><p>${description}</p><label>${text('language')} <select id="language"><option value="es" ${language() === 'es' ? 'selected' : ''}>Español</option><option value="en" ${language() === 'en' ? 'selected' : ''}>English</option></select></label><div class="settings-actions"><button class="primary" data-open-key>${state.bootstrap.hasApiKey ? (language() === 'es' ? 'Actualizar clave de Riot' : 'Update Riot key') : text('configure')}</button><button class="danger" data-shutdown>${text('closeServer')}</button></div><section class="app-update-card"><p class="eyebrow">${language() === 'es' ? 'ACTUALIZACIONES DE LA APLICACIÓN' : 'APPLICATION UPDATES'}</p><h3>TFTTool ${escapeHtml(update.currentVersion || state.bootstrap.appVersion || '')}</h3><p>${escapeHtml(updateStatus)}</p><button class="primary" data-app-update ${active ? 'disabled' : ''}>${language() === 'es' ? 'Actualizar TFTTool' : 'Update TFTTool'}</button></section><section class="data-pack-card"><p class="eyebrow">${language() === 'es' ? 'DATOS PORTÁTILES' : 'PORTABLE DATA'}</p><h3>TFTTool Data Pack</h3><p>${dataDescription}</p><div class="settings-actions"><button class="primary" data-export-pack>${language() === 'es' ? 'Exportar datos' : 'Export data'}</button><button class="secondary" data-import-pack>${language() === 'es' ? 'Importar datos' : 'Import data'}</button><input class="hidden" id="data-pack-input" type="file" accept=".tftpack,application/vnd.tfttool.pack"></div>${state.dataPackStatus ? `<p class="data-pack-status">${escapeHtml(state.dataPackStatus)}</p>` : ''}</section><p class="legal">TFTTool isn't endorsed by Riot Games and doesn't reflect the views or opinions of Riot Games or anyone officially involved in producing or managing Riot Games properties. Riot Games, and all associated properties are trademarks or registered trademarks of Riot Games, Inc.</p></section>`;
 }
 function signed(value, formatter = (numberValue) => numberValue.toFixed(2)) { return value ? `${value > 0 ? '+' : ''}${formatter(value)}` : '—'; }
 function trendName(item) { return item ? compositionDisplayName(item.current || item.previous || item) : '—'; }
@@ -156,7 +159,7 @@ function render() {
   const title = text(state.tab);
   $('#page-title').textContent = title;
   document.querySelectorAll('.nav').forEach((button) => button.classList.toggle('active', button.dataset.tab === state.tab));
-  const view = state.tab === 'home' ? home(snapshot) : state.tab === 'interactions' ? interactionsView(snapshot) : state.tab === 'history' ? history() : state.tab === 'settings' ? settings() : result ? entities(result[state.tab], state.tab) : home(null);
+  const view = state.tab === 'home' ? home(snapshot) : state.tab === 'interactions' ? interactionsView(snapshot) : state.tab === 'history' ? history() : result ? entities(result[state.tab], state.tab) : home(null);
   $('#content').innerHTML = view;
   $('#connection').textContent = snapshot ? `${number.format(snapshot.result.observations)} ${text('observations')}` : (language() === 'es' ? 'Sin datos' : 'No data');
   $('#connection').classList.toggle('live', Boolean(snapshot));
@@ -167,6 +170,29 @@ function render() {
 }
 async function load() { const [bootstrap, snapshots] = await Promise.all([api('/api/bootstrap'), api('/api/snapshots')]); state.bootstrap = { ...bootstrap, snapshots }; const snapshot = state.snapshotId ? `&snapshot=${encodeURIComponent(state.snapshotId)}` : ''; [state.analysis, state.history] = await Promise.all([api(`/api/analysis?region=${encodeURIComponent(state.region)}${snapshot}`), api('/api/history')]); state.metadata = null; if (state.analysis) { try { state.metadata = await api(`/api/metadata?patch=${encodeURIComponent(state.analysis.patch || '')}&locale=${language() === 'en' ? 'en_US' : 'es_ES'}`); } catch {} } render(); }
 function openKey() { $('#key-dialog').showModal(); }
+
+function openSettings() {
+  $('#settings-body').innerHTML = settings();
+  $('#settings-dialog').showModal();
+  document.querySelector('[data-tab="settings"]')?.classList.add('active');
+}
+
+async function pollAppUpdate() {
+  clearTimeout(state.updatePollTimer); state.updatePollTimer = null;
+  try {
+    state.bootstrap.appUpdate = await api('/api/app-update');
+    if ($('#settings-dialog').open) $('#settings-body').innerHTML = settings();
+    if (['checking', 'downloading'].includes(state.bootstrap.appUpdate.state)) state.updatePollTimer = setTimeout(pollAppUpdate, 500);
+  } catch (error) {
+    state.bootstrap.appUpdate = { state: 'failed', currentVersion: state.bootstrap.appVersion, error: error.message };
+    if ($('#settings-dialog').open) $('#settings-body').innerHTML = settings();
+  }
+}
+
+async function startAppUpdate() {
+  await api('/api/app-update', { method: 'POST' });
+  await pollAppUpdate();
+}
 
 function exportDataPack() {
   const link = document.createElement('a');
@@ -282,7 +308,7 @@ async function openDetails(type, id) {
   $('#detail-dialog').showModal();
 }
 
-document.querySelector('.sidebar').addEventListener('click', (event) => { const button = event.target.closest('[data-tab]'); if (!button) return; state.tab = button.dataset.tab; render(); });
+document.querySelector('.sidebar').addEventListener('click', (event) => { const button = event.target.closest('[data-tab]'); if (!button) return; if (button.dataset.tab === 'settings') return openSettings(); state.tab = button.dataset.tab; render(); });
 $('#search').addEventListener('input', (event) => { state.search = event.target.value; render(); });
 $('#weight').addEventListener('input', (event) => { state.weight = 100 - Number(event.target.value); $('#weight-value').textContent = `${state.weight} / ${100 - state.weight}`; render(); });
 $('#language-toggle').addEventListener('click', async () => { await api('/api/settings', { method: 'PUT', body: JSON.stringify({ language: language() === 'es' ? 'en' : 'es' }) }); await load(); });
@@ -305,6 +331,16 @@ $('#content').addEventListener('click', async (event) => {
 });
 $('#content').addEventListener('keydown', (event) => { if (!['Enter', ' '].includes(event.key)) return; if (event.target.matches('[data-composition-champion]')) { event.preventDefault(); void openCompositionChampion(event.target.dataset.compositionContext, event.target.dataset.compositionChampion); } else if (event.target.matches('[data-interaction-id], [data-composition-id], [data-detail-type]')) { event.preventDefault(); event.target.click(); } });
 $('#detail-dialog').addEventListener('click', (event) => { if (event.target.closest('[data-close-detail]')) $('#detail-dialog').close(); });
+$('#settings-dialog').addEventListener('close', () => render());
+$('#settings-dialog').addEventListener('click', async (event) => {
+  if (event.target.closest('[data-close-settings]')) return $('#settings-dialog').close();
+  if (event.target.closest('[data-open-key]')) return openKey();
+  if (event.target.closest('[data-export-pack]')) return exportDataPack();
+  if (event.target.closest('[data-import-pack]')) return $('#data-pack-input')?.click();
+  if (event.target.closest('[data-app-update]')) return startAppUpdate();
+  if (event.target.closest('[data-shutdown]') && confirm(language() === 'es' ? '¿Cerrar TFTTool y detener su servidor local?' : 'Close TFTTool and stop its local server?')) await api('/api/shutdown', { method: 'POST' });
+});
+$('#settings-dialog').addEventListener('change', async (event) => { if (event.target.id === 'language') { await api('/api/settings', { method: 'PUT', body: JSON.stringify({ language: event.target.value }) }); await load(); $('#settings-body').innerHTML = settings(); } else if (event.target.id === 'data-pack-input' && event.target.files?.[0]) { await importDataPack(event.target.files[0]); $('#settings-body').innerHTML = settings(); } });
 $('#content').addEventListener('change', async (event) => { if (event.target.id === 'language') { await api('/api/settings', { method: 'PUT', body: JSON.stringify({ language: event.target.value }) }); await load(); } else if (event.target.id === 'data-pack-input' && event.target.files?.[0]) await importDataPack(event.target.files[0]); });
 $('#key-form').addEventListener('submit', async (event) => { if (event.submitter?.value !== 'save') return; event.preventDefault(); const error = $('#key-error'); error.classList.add('hidden'); try { await api('/api/settings/riot-key', { method: 'PUT', body: JSON.stringify({ key: $('#riot-key').value }) }); $('#riot-key').value = ''; $('#key-dialog').close(); state.keyPrompted = false; state.snapshotId = null; await api('/api/refresh', { method: 'POST' }); await load(); } catch (cause) { error.textContent = `${language() === 'es' ? 'No se pudo guardar la clave' : 'Could not save the key'}: ${cause.message}`; error.classList.remove('hidden'); } });
 load().catch((error) => { $('#content').innerHTML = `<section class="empty"><div><h2>${language() === 'es' ? 'Error local' : 'Local error'}</h2><p>${escapeHtml(error.message)}</p></div></section>`; });

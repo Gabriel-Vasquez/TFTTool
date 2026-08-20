@@ -1,6 +1,7 @@
 const validNumber = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 export const patchLine = (value) => String(value || '').match(/\b(\d+\.\d+)\b/)?.[1] || 'unknown';
 export const isDisplayableUnitId = (id) => Boolean(id) && !/_PVE_|_Summon$/i.test(String(id));
+export const isAnalyticItemId = (id) => Boolean(id) && !/AnimaSquadItem_Tier\d+_|_EmptyBag$/i.test(String(id));
 const displayableUnit = (unit) => {
   const id = String(unit.character_id || unit.name || '');
   return isDisplayableUnitId(id);

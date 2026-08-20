@@ -101,13 +101,37 @@ test('compressed bundled seed preserves data and manifest-skips an already impor
   const packFile = join(directory, 'latest-snapshot.tftpack');
   const manifestFile = join(directory, 'latest-snapshot.manifest.json');
   await writeFile(packFile, pack);
-  await writeFile(manifestFile, JSON.stringify({ format: 'tfttool-bundled-data', version: 1, snapshotId: snapshot.id, packSha256: createHash('sha256').update(pack).digest('hex') }));
+  await writeFile(manifestFile, JSON.stringify({ format: 'tfttool-bundled-data', version: 1, snapshotId: snapshot.id, observationCount: snapshot.observations.length, analysisVersion: snapshot.result.analysisVersion, packSha256: createHash('sha256').update(pack).digest('hex') }));
 
   assert.deepEqual(await importBundledSnapshot(store, packFile, manifestFile), { imported: true, reason: 'newer' });
   assert.equal(store.latestSnapshot().observations[0].id, 'packed-seed-observation');
   assert.equal(store.state.portableMetadata.en_US.version, '16.16.1');
   await writeFile(packFile, 'intentionally unreadable after successful import');
-  assert.deepEqual(await importBundledSnapshot(store, packFile, manifestFile), { imported: false, reason: 'already_seen' });
+  assert.deepEqual(await importBundledSnapshot(store, packFile, manifestFile), { imported: false, reason: 'already_verified' });
+});
+
+test('compressed bundled seed repairs a partial local copy of the same canonical snapshot', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'tfttool-store-packed-repair-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = new LocalStore(directory);
+  await store.load();
+  const snapshot = publishableSnapshot('canonical-seed', '2026-08-20T00:00:00.000Z');
+  snapshot.observations.push({ ...snapshot.observations[0], id: 'canonical-seed-observation-2' });
+  snapshot.result.observations = 2;
+  const metadata = { es_ES: { version: '16.16.1' }, en_US: { version: '16.16.1' } };
+  const pack = createDataPack({ snapshots: [snapshot], metadata, appVersion: '0.6.2' });
+  const packSha256 = createHash('sha256').update(pack).digest('hex');
+  const packFile = join(directory, 'latest-snapshot.tftpack');
+  const manifestFile = join(directory, 'latest-snapshot.manifest.json');
+  await writeFile(packFile, pack);
+  await writeFile(manifestFile, JSON.stringify({ format: 'tfttool-bundled-data', version: 1, snapshotId: snapshot.id, observationCount: 2, analysisVersion: snapshot.result.analysisVersion, packSha256 }));
+  await store.addSnapshot({ ...snapshot, observations: snapshot.observations.slice(0, 1), result: { ...snapshot.result, observations: 1 } });
+  store.state.bundledSnapshotIds.push(snapshot.id);
+  await store.save();
+
+  assert.deepEqual(await importBundledSnapshot(store, packFile, manifestFile), { imported: false, reason: 'reconciled' });
+  assert.equal(store.latestSnapshot().observations.length, 2);
+  assert.equal(store.state.bundledSnapshotHashes[snapshot.id], packSha256);
 });
 
 test('portable data import is atomic and merges new snapshots without deleting history or preferences', async (t) => {

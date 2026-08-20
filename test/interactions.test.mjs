@@ -84,3 +84,14 @@ test('Counter Items use opponent-conditioned uplift and deduplicate repeated ite
   assert.equal(itemX.lobbies, 6);
   assert.equal(counters.find((entry) => entry.itemId === 'ItemY').boards, 6);
 });
+
+test('Counter Items exclude Anima Squad progression items', () => {
+  const observations = [];
+  for (let index = 0; index < 8; index += 1) {
+    observations.push(board(`anima-${index}`, 'a', 'A', 2, ['TFT17_AnimaSquadItem_Tier3_Annihilator', 'StandardItem']), board(`anima-${index}`, 'b', 'B', 6));
+  }
+  const result = analyzeInteractions(observations, assignmentsFor(observations), compositionList('A', 'B'), { ...options, minimumItemLobbies: 1, minimumItemContextBoards: 1 });
+  const counters = result.archetypes.find((entry) => entry.id === 'B').counterItems;
+  assert.ok(counters.some((entry) => entry.itemId === 'StandardItem'));
+  assert.ok(counters.every((entry) => !entry.itemId.includes('AnimaSquadItem_Tier')));
+});

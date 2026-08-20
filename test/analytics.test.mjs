@@ -72,6 +72,18 @@ test('global-style champion item prevalence deduplicates boards while loadout sl
   assert.deepEqual(details.find((champion) => champion.id === 'A').loadouts[0].items, ['Item', 'Item', 'Other']);
 });
 
+test('Anima Squad progression items are excluded from analytics without mutating raw observations', () => {
+  const animaItem = 'TFT17_AnimaSquadItem_Tier3_Annihilator';
+  const emblem = 'TFT17_Item_AnimaSquadEmblemItem';
+  const samples = [observation('anima-win', 1, [unit('A', [animaItem, 'TFT_Item_EmptyBag', emblem, 'StandardItem'])])];
+  const result = aggregate(samples);
+  const champion = championDetails(samples).find((entry) => entry.id === 'A');
+  assert.deepEqual(result.items.map((item) => item.id).sort(), [emblem, 'StandardItem'].sort());
+  assert.deepEqual(champion.items.map((item) => item.id).sort(), [emblem, 'StandardItem'].sort());
+  assert.ok(champion.loadouts.every((loadout) => !loadout.items.includes(animaItem)));
+  assert.deepEqual(samples[0].units[0].items, [animaItem, 'TFT_Item_EmptyBag', emblem, 'StandardItem']);
+});
+
 test('flagship contains the complete most frequent board while CORE remains exactly three champions', () => {
   const samples = archetypeSamples('Alpha', 30, 'AlphaItem');
   const result = aggregate(samples, 0.5, { traitBreakpoints: { TraitA: [2, 4] } });
