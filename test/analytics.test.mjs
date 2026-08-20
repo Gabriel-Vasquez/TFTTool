@@ -119,26 +119,30 @@ test('every exact variant derives its own deterministic three-champion itemized 
   assert.deepEqual(reversed.compositions.flatMap((composition) => composition.variants.map((variant) => [variant.id, variant.coreChampions.map((champion) => champion.id)])), variants.map((variant) => [variant.id, variant.coreChampions.map((champion) => champion.id)]));
 });
 
-test('emblem labels use one dominant emblem with deterministic support and telemetry tolerance', () => {
+test('emblem labels combine dominant evidence with visible CORE emblem items', () => {
   const itemMetadata = { FutureTraitEmblemItem: { type: 'emblem', analyticsClass: 'contextual' }, RegularItem: { type: 'regular', analyticsClass: 'comparable' } };
+  const stableCore = [unit('A', ['A1', 'A2', 'A3']), unit('B', ['B1', 'B2', 'B3']), unit('C', ['C1', 'C2', 'C3'])];
   const allEmblem = [
-    observation('emblem-1', 1, [unit('A', ['FutureTraitEmblemItem']), unit('B', ['RegularItem']), unit('C', ['RegularItem'])]),
-    observation('emblem-2', 2, [unit('A', ['FutureTraitEmblemItem']), unit('B', ['RegularItem']), unit('C', ['RegularItem'])])
+    observation('emblem-1', 1, [...stableCore, unit('D', ['FutureTraitEmblemItem'])]),
+    observation('emblem-2', 2, [...stableCore, unit('D', ['FutureTraitEmblemItem'])])
   ];
   const required = aggregate(allEmblem, 0.5, { itemMetadata });
   assert.equal(required.compositions[0].flagship.requiresEmblem, true);
+  assert.equal(required.compositions[0].flagship.statisticallyRequiresEmblem, true);
+  assert.equal(required.compositions[0].flagship.coreRequiresEmblem, false);
   assert.equal(required.compositions[0].flagship.emblemRate, 1);
   assert.equal(required.compositions[0].requiresEmblem, true);
 
-  const optional = aggregate([...allEmblem, observation('without-emblem', 3, [unit('A', ['RegularItem']), unit('B', ['RegularItem']), unit('C', ['RegularItem'])])], 0.5, { itemMetadata });
+  const optional = aggregate([...allEmblem, observation('without-emblem', 3, [...stableCore, unit('D')])], 0.5, { itemMetadata });
   assert.equal(optional.compositions[0].flagship.requiresEmblem, false);
+  assert.equal(optional.compositions[0].flagship.statisticallyRequiresEmblem, false);
+  assert.equal(optional.compositions[0].flagship.coreRequiresEmblem, false);
   assert.equal(optional.compositions[0].flagship.emblemRate, 2 / 3);
   assert.equal(optional.compositions[0].requiresEmblem, false);
 
   const telemetryTolerant = Array.from({ length: 130 }, (_, index) => observation(`tolerant-${index}`, (index % 8) + 1, [
-    unit('A', index < 127 ? ['FutureTraitEmblemItem'] : index === 127 ? ['OtherTraitEmblemItem'] : ['RegularItem']),
-    unit('B', ['RegularItem']),
-    unit('C', ['RegularItem'])
+    ...stableCore,
+    unit('D', index < 127 ? ['FutureTraitEmblemItem'] : index === 127 ? ['OtherTraitEmblemItem'] : ['RegularItem'])
   ]));
   const tolerantMetadata = { ...itemMetadata, OtherTraitEmblemItem: { type: 'emblem', analyticsClass: 'contextual' } };
   const tolerant = aggregate(telemetryTolerant, 0.5, { itemMetadata: tolerantMetadata }).compositions[0].flagship;
@@ -147,10 +151,23 @@ test('emblem labels use one dominant emblem with deterministic support and telem
   assert.equal(tolerant.requiredEmblemId, 'FutureTraitEmblemItem');
   assert.equal(tolerant.requiredEmblemCount, 127);
   assert.equal(tolerant.requiredEmblemRate, 127 / 130);
+  assert.equal(tolerant.statisticallyRequiresEmblem, true);
+  assert.equal(tolerant.coreRequiresEmblem, false);
 
-  const lowSupport = aggregate(telemetryTolerant.slice(0, 29).map((sample, index) => index === 28 ? { ...sample, units: [unit('A', ['RegularItem']), unit('B', ['RegularItem']), unit('C', ['RegularItem'])] } : sample), 0.5, { itemMetadata: tolerantMetadata }).compositions[0].flagship;
+  const lowSupport = aggregate(telemetryTolerant.slice(0, 29).map((sample, index) => index === 28 ? { ...sample, units: [...stableCore, unit('D', ['RegularItem'])] } : sample), 0.5, { itemMetadata: tolerantMetadata }).compositions[0].flagship;
   assert.equal(lowSupport.requiredEmblemRate, 28 / 29);
   assert.equal(lowSupport.requiresEmblem, false);
+
+  const coreVisible = aggregate(Array.from({ length: 24 }, (_, index) => observation(`core-${index}`, (index % 8) + 1, [
+    unit('A', index === 0 ? ['A1', 'A2', 'FutureTraitEmblemItem'] : ['A1', 'A2']),
+    unit('B', ['B1', 'B2']),
+    unit('C', ['C1', 'C2']),
+    unit('D')
+  ])), 0.5, { itemMetadata }).compositions[0].flagship;
+  assert.equal(coreVisible.statisticallyRequiresEmblem, false);
+  assert.equal(coreVisible.coreRequiresEmblem, true);
+  assert.deepEqual(coreVisible.coreEmblemIds, ['FutureTraitEmblemItem']);
+  assert.equal(coreVisible.requiresEmblem, true);
 });
 
 test('empty final boards remain counted in the archetype but are not presented as importable variants', () => {

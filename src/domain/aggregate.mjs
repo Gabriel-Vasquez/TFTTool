@@ -147,8 +147,8 @@ export function deriveTraitBreakpoints(observations) {
 export const EMBLEM_REQUIREMENT_MIN_SAMPLES = 30;
 export const EMBLEM_REQUIREMENT_RATE = 0.95;
 
-export function emblemRequirement(samples, itemMetadata = {}) {
-  if (!samples.length) return { emblemRate: 0, requiredEmblemId: null, requiredEmblemCount: 0, requiredEmblemRate: 0, requiresEmblem: false };
+export function emblemRequirement(samples, itemMetadata = {}, coreChampions = []) {
+  if (!samples.length) return { emblemRate: 0, requiredEmblemId: null, requiredEmblemCount: 0, requiredEmblemRate: 0, coreEmblemIds: [], coreRequiresEmblem: false, statisticallyRequiresEmblem: false, requiresEmblem: false };
   const counts = new Map();
   let observationsWithEmblem = 0;
   for (const observation of samples) {
@@ -158,14 +158,21 @@ export function emblemRequirement(samples, itemMetadata = {}) {
   }
   const dominant = [...counts.entries()].map(([id, count]) => ({ id, count })).sort((a, b) => b.count - a.count || a.id.localeCompare(b.id))[0] || null;
   const sampleSize = samples.length;
-  const requiredEmblemRate = dominant ? dominant.count / sampleSize : 0;
-  const requiresEmblem = Boolean(dominant) && (dominant.count === sampleSize || (sampleSize >= EMBLEM_REQUIREMENT_MIN_SAMPLES && requiredEmblemRate >= EMBLEM_REQUIREMENT_RATE));
+  const dominantRate = dominant ? dominant.count / sampleSize : 0;
+  const statisticallyRequiresEmblem = Boolean(dominant) && (dominant.count === sampleSize || (sampleSize >= EMBLEM_REQUIREMENT_MIN_SAMPLES && dominantRate >= EMBLEM_REQUIREMENT_RATE));
+  const coreEmblemIds = [...new Set(coreChampions.flatMap((champion) => champion.itemSlots.slice(0, 3).map((item) => item.id).filter((id) => isEmblemItem(id, itemMetadata))))];
+  const coreRequiresEmblem = coreEmblemIds.length > 0;
+  const requiredEmblemId = coreEmblemIds[0] || dominant?.id || null;
+  const requiredEmblemCount = counts.get(requiredEmblemId) || 0;
   return {
     emblemRate: observationsWithEmblem / sampleSize,
-    requiredEmblemId: dominant?.id || null,
-    requiredEmblemCount: dominant?.count || 0,
-    requiredEmblemRate,
-    requiresEmblem
+    requiredEmblemId,
+    requiredEmblemCount,
+    requiredEmblemRate: requiredEmblemCount / sampleSize,
+    coreEmblemIds,
+    coreRequiresEmblem,
+    statisticallyRequiresEmblem,
+    requiresEmblem: coreRequiresEmblem || statisticallyRequiresEmblem
   };
 }
 
@@ -185,12 +192,13 @@ export function aggregate(observations, prevalenceWeight = 0.5, { traitBreakpoin
     }
     const allVariants = [...variantGroups.entries()].map(([id, variantSamples]) => {
       const variantChampions = championDetails(variantSamples, itemMetadata);
+      const coreChampions = variantChampions.slice(0, 3);
       return {
         id,
         prevalence: variantSamples.length / samples.length,
         ...entityMetrics(variantSamples),
-        ...emblemRequirement(variantSamples, itemMetadata),
-        coreChampions: variantChampions.slice(0, 3),
+        ...emblemRequirement(variantSamples, itemMetadata, coreChampions),
+        coreChampions,
         champions: variantChampions
       };
     }).sort((a, b) => b.sampleSize - a.sampleSize || a.id.localeCompare(b.id));

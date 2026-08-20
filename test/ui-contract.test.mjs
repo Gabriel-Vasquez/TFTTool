@@ -90,7 +90,8 @@ test('exact variants render their own three-champion itemized CORE while remaini
     readFile(join(root, 'public', 'app.js'), 'utf8'),
     readFile(join(root, 'src', 'domain', 'aggregate.mjs'), 'utf8')
   ]);
-  assert.match(aggregate, /coreChampions: variantChampions\.slice\(0, 3\)/);
+  assert.match(aggregate, /const coreChampions = variantChampions\.slice\(0, 3\)/);
+  assert.match(aggregate, /requiresEmblem: coreRequiresEmblem \|\| statisticallyRequiresEmblem/);
   assert.match(app, /function variantCore/);
   assert.match(app, /variant\.coreChampions \|\| variant\.champions\?\.slice\(0, 3\)/);
   assert.match(app, /variant-core-panel/);
