@@ -12,9 +12,9 @@ All development and testing must run in the repository-owned isolated QA sandbox
 
 The first owner-facing in-place update must include the complete, freshly validated six-region real-data snapshot collected during QA so the product is ready for immediate use without another same-day refresh. Never discard that retrieved dataset. Import it only when newer than the owner's latest local snapshot, while preserving every existing historical snapshot, setting, and encrypted Riot key.
 
-- Phase: TFTTool 0.6.10 is a validated release candidate; 0.6.9 remains the published production-BETA version until release upload and public update-channel verification pass.
+- Phase: TFTTool 0.6.10 is the published and updater-verified production-BETA version.
 - Branch: `main`.
-- Published release: TFTTool `0.6.9` on public `main`, with installer asset tag `v0.6.9` and `updates/stable.json` as the controlled stable channel.
+- Published release: TFTTool `0.6.10` on public `main`, with installer asset tag `v0.6.10` and `updates/stable.json` as the controlled stable channel.
 - GitHub: public `Gabriel-Vasquez/TFTTool`.
 - Implemented and installed: official multi-region Riot ingestion, protected local key storage and invalid-key replacement, full baseline plus incremental diff refresh, deterministic current-set archetypes, real trait breakpoints, exact prevalence/raw-placement weighting, TFTactics-style champion/item presentation, flagship-relative variant diffs, Team Planner export codes, shared-lobby matchup and opponent-conditioned Counter Item analytics, evidence drill-downs, snapshot history/trends, portable `.tftpack` transfer, complete EN/ES UX, bounded rendering/search, secured standalone Electron window, local shutdown control, compressed bundled snapshot import, and NSIS in-place updating.
 - Owner-data baseline: TFTTool 0.6.1 is installed at `C:\Program Files\TFTTool`. The data directory, encrypted key availability, Spanish preference, snapshot identity, history, and all 12,000 observations remain preserved after the in-place migration.
@@ -42,7 +42,7 @@ The first owner-facing in-place update must include the complete, freshly valida
 
 ## Next actions
 
-1. Publish the validated 0.6.10 installer and verify the exact 0.6.9-to-0.6.10 Settings update path; owner exports remain staged automatically for the next validated release build.
+1. Observe the production-BETA release and collect owner feedback for a future version; owner exports remain staged automatically for the next validated release build.
 2. Continue production-BETA use and report any changes required before version 1.0; avoid speculative feature work until that feedback arrives.
 3. Future explicit data refreshes reuse the rolling five-day/current-patch sample and request only post-baseline match IDs plus unseen match details.
 
@@ -93,3 +93,4 @@ The first owner-facing in-place update must include the complete, freshly valida
 - Public-channel QA verifies that a 0.6.6 client sees 0.6.7 as available, a 0.6.7 client reports up to date, and the exact updater code path downloads all 93,642,410 bytes from the public release and reproduces SHA-256 `8B91A2A9327051CCE147F72D32CA6F3C9294DA7D0B548ECF6DB58C3B0C72E175`.
 - Public-channel QA verifies that a 0.6.7 client sees 0.6.8 as available, a 0.6.8 client reports up to date, and the exact updater code path downloads all 93,900,883 bytes from the public release and reproduces SHA-256 `AF3ABDFD78B7939AC8880830C2F59EE49ECF3724ECF95A8AB0E49F42D7FD8E32`.
 - Public-channel QA verifies that a 0.6.8 client sees 0.6.9 as available, a 0.6.9 client reports up to date, and the exact updater code path downloads all 93,903,082 bytes from the public release and reproduces SHA-256 `13FC4FD651438AB1C8A21649DE50C4373C3B87833D411B478FA0D68613A319D5`.
+- Public-channel QA verifies that a 0.6.9 client sees 0.6.10 as available, a 0.6.10 client reports up to date, and the exact updater code path downloads all 93,901,235 bytes from the public release and reproduces SHA-256 `643E8C7672F76BAB4BF42813A9C1579F3B857E244CD656DDAF12E130F873E89D`.
