@@ -3,12 +3,17 @@ import { isCurrentRankedMatch, normalizeParticipant } from '../domain/normalizat
 
 const pause = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const observationTime = (observation) => Date.parse(observation.recordedAt) || 0;
+export const ELITE_TIERS = Object.freeze(['CHALLENGER', 'GRANDMASTER', 'MASTER']);
+const DISCOVERY_BATCH_SIZE = 100;
+const tierPriority = (tier) => ELITE_TIERS.indexOf(String(tier || '').toUpperCase());
+const matchSequence = (id) => Number(String(id || '').match(/_(\d+)$/)?.[1]) || 0;
+const compareCandidateMatches = (left, right) => matchSequence(right[0]) - matchSequence(left[0]) || right[1] - left[1] || right[0].localeCompare(left[0]);
 
 function retainCurrentSample(observations, patch, target, now = Date.now()) {
   const oldestAllowed = now - MAX_SAMPLE_AGE_DAYS * 86_400_000;
   return observations
     .filter((observation) => (!patch || observation.patch === patch) && observationTime(observation) >= oldestAllowed && observationTime(observation) <= now)
-    .sort((left, right) => observationTime(right) - observationTime(left))
+    .sort((left, right) => observationTime(right) - observationTime(left) || left.id.localeCompare(right.id))
     .slice(0, target);
 }
 
@@ -50,9 +55,9 @@ export class RiotClient {
   routingUrl(region, path) { return `https://${REGIONS[region].routing}.api.riotgames.com${path}`; }
 
   async challengerPlayers(region) {
-    const tierNames = ['challenger', 'grandmaster', 'master'];
+    const tierNames = ELITE_TIERS.map((tier) => tier.toLowerCase());
     const tiers = await Promise.all(tierNames.map((tier) => this.request(this.platformUrl(region, `/tft/league/v1/${tier}`), 4, region)));
-    return tiers.flatMap((league, index) => (league.entries || []).map((entry) => ({ ...entry, tier: tierNames[index].toUpperCase() }))).sort((a, b) => tierNames.indexOf(a.tier.toLowerCase()) - tierNames.indexOf(b.tier.toLowerCase()) || b.leaguePoints - a.leaguePoints);
+    return tiers.flatMap((league, index) => (league.entries || []).map((entry) => ({ ...entry, tier: tierNames[index].toUpperCase() }))).sort((a, b) => tierNames.indexOf(a.tier.toLowerCase()) - tierNames.indexOf(b.tier.toLowerCase()) || b.leaguePoints - a.leaguePoints || String(a.puuid).localeCompare(String(b.puuid)));
   }
 
   async matchIds(region, puuid, { startTime = null, count = 20 } = {}) {
@@ -69,17 +74,108 @@ export class RiotClient {
   async sampleRegion(region, { target = TARGET_OBSERVATIONS_PER_REGION, checkpoint = () => {}, resume = {} } = {}) {
     this.activeRegion = region;
     let observations = retainCurrentSample([...(resume.observations || [])], resume.currentPatch, target);
+    const retainedPatchStart = observations.length ? Math.min(...observations.map(observationTime)) : null;
     const ladder = await this.challengerPlayers(region);
     const players = ladder;
-    const eligiblePuuids = new Set(players.map((player) => player.puuid).filter(Boolean));
+    const playerByPuuid = new Map(players.filter((player) => player.puuid && tierPriority(player.tier) >= 0).map((player) => [player.puuid, player]));
+    if (resume.rankBackfill === true) {
+      observations = retainCurrentSample(observations.flatMap((observation) => {
+        const ranked = playerByPuuid.get(observation.playerId);
+        if (!ranked || tierPriority(ranked.tier) > tierPriority('GRANDMASTER')) return [];
+        return [{ ...observation, sourceTier: ranked.tier, sourceLeaguePoints: Number(ranked.leaguePoints), sourceRankProvenance: 'current_ladder_backfill' }];
+      }), resume.currentPatch, target);
+    }
     const observationIds = new Set(observations.map((observation) => observation.id));
-    const knownMatchIds = new Set(observations.map((observation) => observation.matchId).filter(Boolean));
+    const processedMatchPriority = new Map();
+    for (const observation of observations) {
+      if (!observation.matchId) continue;
+      const priority = tierPriority(observation.sourceTier);
+      processedMatchPriority.set(observation.matchId, Math.max(processedMatchPriority.get(observation.matchId) ?? -1, priority >= 0 ? priority : ELITE_TIERS.length - 1));
+    }
     const incremental = resume.incremental === true;
     const scanLimit = incremental ? Math.min(players.length, Math.max(1, resume.scanLimit || 100)) : players.length;
     const incrementalStartTime = incremental && observations.length ? Math.floor(Math.max(...observations.map(observationTime)) / 1_000) - 60 : null;
     let playersScanned = resume.playersScanned || 0;
     const baselinePatch = observations[0]?.patch || resume.currentPatch || null;
     let currentPatch = incremental && playersScanned === 0 ? null : resume.currentPatch || baselinePatch;
+
+    const appendMatch = (match, maximumPriority) => {
+      if (!isCurrentRankedMatch(match, Date.now(), MAX_SAMPLE_AGE_DAYS)) return;
+      const participants = (match.info?.participants || []).filter((item) => {
+        const ranked = playerByPuuid.get(item.puuid);
+        return ranked && tierPriority(ranked.tier) <= maximumPriority;
+      });
+      for (const participant of participants) {
+        const ranked = playerByPuuid.get(participant.puuid);
+        const observation = normalizeParticipant(match, participant, region, ranked);
+        currentPatch ||= observation.patch;
+        if (observation.patch === currentPatch && !observationIds.has(observation.id)) { observations.push(observation); observationIds.add(observation.id); }
+        if (!incremental && observations.length >= target) break;
+      }
+    };
+
+    if (!incremental) {
+      const masterStart = players.findIndex((player) => tierPriority(player.tier) === tierPriority('MASTER'));
+      const phaseBoundaries = [
+        { priority: tierPriority('GRANDMASTER'), start: 0, end: masterStart < 0 ? players.length : masterStart },
+        { priority: tierPriority('MASTER'), start: masterStart < 0 ? players.length : masterStart, end: players.length }
+      ];
+      const oldestStartTime = Math.floor(Math.max(Date.now() - MAX_SAMPLE_AGE_DAYS * 86_400_000, (retainedPatchStart || 0) - 60_000) / 1_000);
+      const resumePhase = Number(resume.phasePriority);
+      for (const phase of phaseBoundaries) {
+        if (observations.length >= target || phase.start >= phase.end || (Number.isInteger(resumePhase) && phase.priority < resumePhase)) continue;
+        let candidates = new Map(resumePhase === phase.priority && Array.isArray(resume.candidateMatches) ? resume.candidateMatches : []);
+        let candidateOffset = resumePhase === phase.priority ? Number(resume.candidateOffset) || 0 : 0;
+        if (candidates.size && candidateOffset < candidates.size) {
+          const entries = [...candidates];
+          candidates = new Map([
+            ...entries.slice(0, candidateOffset),
+            ...entries.slice(candidateOffset).sort(compareCandidateMatches)
+          ]);
+        }
+        playersScanned = resumePhase === phase.priority ? Math.max(phase.start, playersScanned) : phase.start;
+        while (observations.length < target && (candidates.size || playersScanned < phase.end)) {
+          if (!candidates.size || candidateOffset >= candidates.size) {
+            candidates = new Map();
+            candidateOffset = 0;
+            const discoveryEnd = Math.min(phase.end, playersScanned + DISCOVERY_BATCH_SIZE);
+            for (let index = playersScanned; index < discoveryEnd; index += 1) {
+              const player = players[index];
+              playersScanned = index + 1;
+              this.onProgress({ region, stage: 'discovering', playersScanned, observations: observations.length, tier: ELITE_TIERS[phase.priority] });
+              if (!player.puuid) continue;
+              const ids = await this.matchIds(region, player.puuid, { startTime: oldestStartTime, count: 100 });
+              for (const id of ids) if ((processedMatchPriority.get(id) ?? -1) < phase.priority) candidates.set(id, (candidates.get(id) || 0) + 1);
+              if (playersScanned % 50 === 0) await checkpoint({ observations, playersScanned, currentPatch: currentPatch || baselinePatch, completed: false, incremental: false, scanLimit, phasePriority: phase.priority, candidateMatches: [...candidates], candidateOffset: 0 });
+            }
+            candidates = new Map([...candidates].sort(compareCandidateMatches));
+            await checkpoint({ observations, playersScanned, currentPatch: currentPatch || baselinePatch, completed: false, incremental: false, scanLimit, phasePriority: phase.priority, candidateMatches: [...candidates], candidateOffset });
+            if (!candidates.size) continue;
+          }
+          const orderedCandidates = [...candidates.keys()];
+          for (let index = candidateOffset; index < orderedCandidates.length && observations.length < target; index += 1) {
+            candidateOffset = index + 1;
+            const id = orderedCandidates[index];
+            if ((processedMatchPriority.get(id) ?? -1) >= phase.priority) continue;
+            this.onProgress({ region, stage: 'scanning', playersScanned, matchesScanned: candidateOffset, candidateMatches: orderedCandidates.length, observations: observations.length, tier: ELITE_TIERS[phase.priority] });
+            const match = await this.match(region, id);
+            processedMatchPriority.set(id, phase.priority);
+            appendMatch(match, phase.priority);
+            if (candidateOffset % 50 === 0) {
+              observations = retainCurrentSample(observations, currentPatch || baselinePatch, target);
+              await checkpoint({ observations, playersScanned, currentPatch: currentPatch || baselinePatch, completed: false, incremental: false, scanLimit, phasePriority: phase.priority, candidateMatches: [...candidates], candidateOffset });
+            }
+          }
+          await checkpoint({ observations, playersScanned, currentPatch: currentPatch || baselinePatch, completed: false, incremental: false, scanLimit, phasePriority: phase.priority, candidateMatches: [...candidates], candidateOffset });
+        }
+      }
+      currentPatch ||= baselinePatch;
+      observations = retainCurrentSample(observations, currentPatch, target);
+      await checkpoint({ observations, playersScanned, currentPatch, completed: true, incremental: false, scanLimit });
+      this.onProgress({ region, stage: 'complete', playersScanned, observations: observations.length });
+      return observations;
+    }
+
     for (let index = playersScanned; index < scanLimit && (incremental || observations.length < target); index += 1) {
       const player = players[index];
       playersScanned = index + 1;
@@ -88,18 +184,11 @@ export class RiotClient {
       if (!puuid) continue;
       const ids = await this.matchIds(region, puuid, incremental ? { startTime: incrementalStartTime, count: 100 } : undefined);
       for (const id of ids) {
-        if (incremental && knownMatchIds.has(id)) continue;
+        const currentPriority = Math.max(tierPriority(player.tier), tierPriority('GRANDMASTER'));
+        if ((processedMatchPriority.get(id) ?? -1) >= currentPriority) continue;
         const match = await this.match(region, id);
-        knownMatchIds.add(id);
-        if (!isCurrentRankedMatch(match, Date.now(), MAX_SAMPLE_AGE_DAYS)) continue;
-        const participants = (match.info?.participants || []).filter((item) => item.puuid === puuid || eligiblePuuids.has(item.puuid));
-        for (const participant of participants) {
-          const observation = normalizeParticipant(match, participant, region);
-          currentPatch ||= observation.patch;
-          if (observation.patch === currentPatch && !observationIds.has(observation.id)) { observations.push(observation); observationIds.add(observation.id); }
-          if (!incremental && observations.length >= target) break;
-        }
-        if (!incremental && observations.length >= target) break;
+        processedMatchPriority.set(id, currentPriority);
+        appendMatch(match, currentPriority);
       }
       if (playersScanned % 5 === 0) {
         observations = retainCurrentSample(observations, currentPatch || baselinePatch, target);

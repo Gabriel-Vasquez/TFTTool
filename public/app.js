@@ -1,7 +1,7 @@
 import { buildTeamCode } from './team-code.js';
 
 const ITEM_FILTER_TYPES = ['regular', 'emblem', 'radiant', 'artifact', 'support', 'set_mechanic', 'unknown'];
-const state = { tab: 'home', bootstrap: null, analysis: null, history: null, metadata: null, search: '', region: 'GLOBAL', weight: 50, snapshotId: null, keyPrompted: false, pollTimer: null, updatePollTimer: null, dataPackStatus: '', copyStatus: '', itemTypes: new Set(ITEM_FILTER_TYPES), disabledSynergies: new Set(), expandedCompositions: new Set(), expandedInteractions: new Set() };
+const state = { tab: 'home', bootstrap: null, analysis: null, history: null, metadata: null, search: '', region: 'GLOBAL', weight: 50, championItemWeight: 100, snapshotId: null, keyPrompted: false, pollTimer: null, updatePollTimer: null, dataPackStatus: '', copyStatus: '', itemTypes: new Set(ITEM_FILTER_TYPES), selectedSynergies: new Set(), synergyMenuOpen: false, expandedCompositions: new Set(), expandedInteractions: new Set() };
 const copy = {
   es: { home: 'Meta actual', homeNav: 'Meta', favorites: 'Favoritos', items: 'Objetos', champions: 'Campeones', synergies: 'Sinergias', interactions: 'Interacciones', history: 'Historial', settings: 'Ajustes', eyebrow: 'ANÁLISIS DE ÉLITE', globalRegions: 'Global · todas las regiones', update: 'Actualizar datos', establishedMeta: 'Meta establecido', performance: 'Rendimiento', noData: 'Aún no hay una instantánea de meta', noDataDetail: 'Añade tu clave de Riot Games y pulsa Actualizar datos. El análisis usa exclusivamente partidas clasificatorias recientes y datos oficiales.', configure: 'Configurar clave de Riot', observations: 'observaciones', average: 'Posición media', top4: 'Top 4', win: 'Victoria', score: 'Puntuación meta', prevalence: 'Prevalencia', variants: 'variantes', patch: 'Parche', updated: 'Actualizado', compositions: 'Composiciones', noResults: 'Sin resultados', noResultsDetail: 'No hay resultados para el filtro actual.', evidence: 'EVIDENCIA Y DESGLOSE', sourceGames: 'Partidas fuente', officialIntegration: 'INTEGRACIÓN OFICIAL', riotKey: 'Clave de Riot Games', keySafety: 'Se cifra localmente para tu cuenta de Windows. Nunca se envía fuera de Riot ni se guarda en el repositorio.', saveRefresh: 'Guardar y actualizar', closeServer: 'Cerrar TFTTool', language: 'Idioma', preferences: 'PREFERENCIAS LOCALES', searchPlaceholder: 'Buscar campeones, objetos, sinergias o interacciones', expand: 'Ver variantes', collapse: 'Ocultar variantes' },
   en: { home: 'Current meta', homeNav: 'Meta', favorites: 'Favorites', items: 'Items', champions: 'Champions', synergies: 'Synergies', interactions: 'Team Interactions', history: 'History', settings: 'Settings', eyebrow: 'ELITE ANALYSIS', globalRegions: 'Global · all regions', update: 'Update data', establishedMeta: 'Established meta', performance: 'Performance', noData: 'No meta snapshot yet', noDataDetail: 'Add your Riot Games key and press Update data. Analysis uses only recent ranked games and official data.', configure: 'Configure Riot key', observations: 'observations', average: 'Average placement', top4: 'Top 4', win: 'Win rate', score: 'Meta score', prevalence: 'Prevalence', variants: 'variants', patch: 'Patch', updated: 'Updated', compositions: 'Compositions', noResults: 'No results', noResultsDetail: 'There are no results for the current filter.', evidence: 'EVIDENCE AND BREAKDOWN', sourceGames: 'Source games', officialIntegration: 'OFFICIAL INTEGRATION', riotKey: 'Riot Games key', keySafety: 'It is encrypted locally for your Windows account. It is never sent anywhere except Riot or stored in the repository.', saveRefresh: 'Save and update', closeServer: 'Close TFTTool', language: 'Language', preferences: 'LOCAL PREFERENCES', searchPlaceholder: 'Search champions, items, traits, or interactions', expand: 'Show variants', collapse: 'Hide variants' }
@@ -16,11 +16,18 @@ const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (character
 function language() { return state.bootstrap?.settings?.language || 'es'; }
 function layout() { return state.bootstrap?.settings?.layout === 'compact' ? 'compact' : 'standard'; }
 function text(key) { return copy[language()][key] || key; }
-function scored(items) { if (!items.length) return []; const weight = state.weight / 100; const prevalence = items.map((item) => item.prevalence); const placement = items.map((item) => item.averagePlacement); const minPrevalence = Math.min(...prevalence); const maxPrevalence = Math.max(...prevalence); const minPlacement = Math.min(...placement); const maxPlacement = Math.max(...placement); const normalize = (value, minimum, maximum) => maximum <= minimum ? 0 : Math.max(0, Math.min(1, (value - minimum) / (maximum - minimum))); return items.map((item) => ({ ...item, score: (normalize(item.prevalence, minPrevalence, maxPrevalence) * weight) + ((1 - normalize(item.averagePlacement, minPlacement, maxPlacement)) * (1 - weight)) })).sort((a, b) => b.score - a.score || b.prevalence - a.prevalence || a.id.localeCompare(b.id)); }
+function scored(items, prevalenceWeight = state.weight) { if (!items.length) return []; const weight = prevalenceWeight / 100; const prevalence = items.map((item) => item.prevalence); const placement = items.map((item) => item.averagePlacement); const minPrevalence = Math.min(...prevalence); const maxPrevalence = Math.max(...prevalence); const minPlacement = Math.min(...placement); const maxPlacement = Math.max(...placement); const normalize = (value, minimum, maximum) => maximum <= minimum ? 0 : Math.max(0, Math.min(1, (value - minimum) / (maximum - minimum))); return items.map((item) => ({ ...item, score: (normalize(item.prevalence, minPrevalence, maxPrevalence) * weight) + ((1 - normalize(item.averagePlacement, minPlacement, maxPlacement)) * (1 - weight)) })).sort((a, b) => b.score - a.score || b.prevalence - a.prevalence || a.id.localeCompare(b.id)); }
 function metadata(type, id) { const source = type === 'synergies' ? 'traits' : type; const key = type === 'synergies' ? id.split(':')[0] : id; return state.metadata?.[source]?.[key] || { id, name: id, image: null }; }
 function itemType(id) { return metadata('items', id).type || 'unknown'; }
 function itemAllowed(id) { const type = itemType(id); return ITEM_FILTER_TYPES.includes(type) && state.itemTypes.has(type); }
 function filteredItemEntries(items = [], key = 'id') { return items.filter((item) => itemAllowed(typeof item === 'string' ? item : item?.[key])); }
+function itemComponents(id) { return (metadata('items', id).components || []).filter((component) => metadata('items', component)?.id); }
+function itemComponentsView(id, compact = false) {
+  const components = itemComponents(id);
+  if (!components.length) return '';
+  const label = language() === 'es' ? 'Componentes' : 'Components';
+  return `<div class="item-components ${compact ? 'compact' : ''}"><span>${label}</span><div>${components.map((component) => icon('items', component, 'item-component-icon')).join('')}</div></div>`;
+}
 function availableItemTypes() {
   const available = new Set((state.analysis?.result?.items || []).map((item) => itemType(item.id)));
   return ITEM_FILTER_TYPES.filter((type) => available.has(type));
@@ -41,11 +48,19 @@ function availableSynergies() {
   const ids = new Set((state.analysis?.result?.compositions || []).flatMap((composition) => compositionParts(composition).map((trait) => trait.id)));
   return [...ids].sort((left, right) => metadata('synergies', left).name.localeCompare(metadata('synergies', right).name, language()) || left.localeCompare(right));
 }
-function compositionAllowed(composition) { return compositionParts(composition).every((trait) => !state.disabledSynergies.has(trait.id)); }
+function compositionAllowed(composition) {
+  if (!state.selectedSynergies.size) return true;
+  const traits = new Set(compositionParts(composition).map((trait) => trait.id));
+  return [...state.selectedSynergies].every((id) => traits.has(id));
+}
 function synergyFilterBar() {
   const available = availableSynergies();
   if (!available.length) return '';
-  return `<fieldset class="synergy-filter"><legend>${language() === 'es' ? 'Filtrar meta por sinergia' : 'Filter meta by synergy'}</legend>${available.map((id) => `<label>${icon('synergies', id, 'synergy-filter-icon')}<input type="checkbox" data-synergy-id="${escapeHtml(id)}" ${state.disabledSynergies.has(id) ? '' : 'checked'}><span>${escapeHtml(metadata('synergies', id).name)}</span></label>`).join('')}</fieldset>`;
+  const all = state.selectedSynergies.size === 0;
+  const summary = all
+    ? (language() === 'es' ? 'Todas las sinergias' : 'All synergies')
+    : `${number.format(state.selectedSynergies.size)} ${language() === 'es' ? 'seleccionadas' : 'selected'}`;
+  return `<details class="synergy-filter" ${state.synergyMenuOpen ? 'open' : ''}><summary><span>${language() === 'es' ? 'Filtrar por sinergia' : 'Filter by synergy'}</span><b>${summary}</b></summary><div class="synergy-options"><label class="synergy-all"><input type="checkbox" data-synergy-all ${all ? 'checked' : ''}><span>${language() === 'es' ? 'Todas' : 'All'}</span></label>${available.map((id) => `<label>${icon('synergies', id, 'synergy-filter-icon')}<input type="checkbox" data-synergy-id="${escapeHtml(id)}" ${state.selectedSynergies.has(id) ? 'checked' : ''}><span>${escapeHtml(metadata('synergies', id).name)}</span></label>`).join('')}</div></details>`;
 }
 function teamCodeButton(champions, compact = false) {
   const code = buildTeamCode(champions, state.metadata?.champions);
@@ -53,11 +68,30 @@ function teamCodeButton(champions, compact = false) {
   const label = language() === 'es' ? 'Copiar equipo' : 'Copy team';
   return `<button class="copy-team ${compact ? 'compact' : ''}" data-copy-team="${escapeHtml(code)}" title="${language() === 'es' ? 'Copiar código para el Planificador de equipos de TFT' : 'Copy code for the TFT Team Planner'}">${label}</button>`;
 }
-function compositionSearchText(item) { return [compositionDisplayName(item), ...item.champions.flatMap((champion) => [metadata('champions', champion.id).name, ...champion.items.map((entry) => metadata('items', entry.id).name)])].join(' '); }
-function visible(items, type = state.tab) { const query = state.search.toLocaleLowerCase(language()).trim(); return scored(items).filter((item) => (type !== 'items' || itemAllowed(item.id)) && (!query || `${JSON.stringify(item)} ${type === 'composition' ? compositionSearchText(item) : metadata(type, item.id).name}`.toLocaleLowerCase(language()).includes(query))); }
+function compositionChampionEntries(item) {
+  const entries = [...(item.coreChampions || []), ...(item.flagship?.champions || []), ...(item.variants || []).flatMap((variant) => variant.champions || [])];
+  return [...new Map(entries.filter((champion) => champion?.id).map((champion) => [champion.id, champion])).values()];
+}
+function compositionSearchText(item) {
+  const champions = compositionChampionEntries(item);
+  return [
+    compositionDisplayName(item),
+    ...compositionParts(item).flatMap((trait) => [trait.id, metadata('synergies', trait.id).name]),
+    ...champions.flatMap((champion) => [champion.id, metadata('champions', champion.id).name, ...(champion.items || []).map((entry) => metadata('items', entry.id).name)])
+  ].join(' ');
+}
+function visible(items, type = state.tab) { const query = state.search.toLocaleLowerCase(language()).trim(); return scored(items).filter((item) => (type !== 'items' || itemAllowed(item.id)) && (!query || (type === 'composition' ? compositionSearchText(item) : `${JSON.stringify(item)} ${metadata(type, item.id).name}`).toLocaleLowerCase(language()).includes(query))); }
 function resultLimitNotice(shown, total) { return total > shown ? `<p class="result-limit">${language() === 'es' ? `Mostrando los primeros ${number.format(shown)} de ${number.format(total)} resultados. Usa la búsqueda para filtrar todo el conjunto.` : `Showing the first ${number.format(shown)} of ${number.format(total)} results. Use search to filter the full dataset.`}</p>` : ''; }
 function icon(type, id, className = 'entity-icon', detail = '') { const meta = metadata(type, id); const tooltip = [meta.name, meta.description, detail].filter(Boolean).join(' · '); return `<span class="icon-wrap">${meta.image ? `<img class="${className}" src="${escapeHtml(meta.image)}" alt="${escapeHtml(meta.name)}" loading="lazy">` : `<span class="${className}"></span>`}<span class="tooltip" role="tooltip">${escapeHtml(tooltip)}</span></span>`; }
-function championTile(champion, { core = false, showName = false, hideItems = false, itemSlots = false, contextId = null, coreTag = false } = {}) {
+function championCost(champion) {
+  const direct = Number(champion.cost);
+  if (direct >= 1 && direct <= 10) return direct;
+  const rarity = Number(champion.rarity);
+  if (rarity >= 0 && rarity <= 9) return rarity + 1;
+  const fallback = Number(metadata('champions', champion.id).cost);
+  return fallback >= 1 && fallback <= 10 ? fallback : null;
+}
+function championTile(champion, { core = false, highlighted = false, showName = false, hideItems = false, itemSlots = false, contextId = null } = {}) {
   const itemSource = itemSlots ? champion.itemSlots : champion.items;
   const items = filteredItemEntries((itemSource || []).map((item) => typeof item === 'string' ? { id: item } : item).filter((item) => item?.id)).slice(0, 3);
   const modal = [...(champion.stars || [{ tier: champion.tier || 1, rate: 1 }])].sort((a, b) => (b.rate || 0) - (a.rate || 0))[0]?.tier || champion.tier || 1;
@@ -66,7 +100,8 @@ function championTile(champion, { core = false, showName = false, hideItems = fa
   const itemIcons = !hideItems && items.length ? `<span class="champion-items">${items.map((item) => icon('items', item.id, 'champion-item', Number.isFinite(item.prevalence) ? `${percent(item.prevalence)} · ${number.format(item.count || 0)} / ${number.format(item.sampleSize || champion.sampleSize || 0)} ${text('observations')}` : '')).join('')}</span>` : '';
   const name = showName ? `<span class="champion-name">${escapeHtml(metadata('champions', champion.id).name)}</span>` : '';
   const interaction = contextId ? ` role="button" tabindex="0" data-composition-champion="${escapeHtml(champion.id)}" data-composition-context="${escapeHtml(contextId)}"` : '';
-  return `<span class="champion-tile${core ? ' core-champion' : ''}${coreTag ? ' compact-core' : ''}${contextId ? ' contextual-champion' : ''}"${interaction}>${icon('champions', champion.id, 'champion-portrait', [`${modal}★`, averageItems, Number.isFinite(champion.presence) ? `${percent(champion.presence)} ${language() === 'es' ? 'presencia' : 'presence'}` : ''].filter(Boolean).join(' · '))}<b class="star-level star-${modal}">${modal}★</b>${coreTag ? '<span class="core-tag">CORE</span>' : ''}${itemIcons}${name}</span>`;
+  const cost = championCost(champion);
+  return `<span class="champion-tile${core ? ' core-champion' : ''}${highlighted ? ' highlighted-core' : ''}${cost ? ` cost-${cost}` : ''}${contextId ? ' contextual-champion' : ''}"${interaction}>${icon('champions', champion.id, 'champion-portrait', [`${cost ? `${cost}g` : ''}`, `${modal}★`, averageItems, Number.isFinite(champion.presence) ? `${percent(champion.presence)} ${language() === 'es' ? 'presencia' : 'presence'}` : ''].filter(Boolean).join(' · '))}<b class="star-level star-${modal}">${modal}★</b>${itemIcons}${name}</span>`;
 }
 function patchLabel(value) { return String(value || '').match(/\b\d+\.\d+\b/)?.[0] || value || '—'; }
 function setLabel(value) { return String(value || '').match(/\d+/)?.[0] || value || '—'; }
@@ -111,7 +146,14 @@ function sufficiencyReason(reason) {
 function entities(items, type) {
   const matching = visible(items, type); const filtered = matching.slice(0, MAX_VISIBLE_RESULTS);
   if (!filtered.length) return `<section class="empty"><div><h2>${text('noResults')}</h2><p>${text('noResultsDetail')}</p></div></section>`;
-  return `${resultLimitNotice(filtered.length, matching.length)}<div class="list">${filtered.map((item) => { const meta = metadata(type, item.id); const imageClass = type === 'items' ? 'entity-icon item-entity-icon' : type === 'champions' ? 'entity-icon champion-entity-icon' : 'entity-icon'; const typeBadge = type === 'items' ? `<span class="item-type-badge">${itemTypeLabel(itemType(item.id))}</span>` : ''; return `<article class="row entity" tabindex="0" data-detail-type="${type}" data-detail-id="${escapeHtml(item.id)}"><div class="entity-title">${icon(type, item.id, imageClass, `${number.format(item.sampleSize)} ${text('observations')} · ${text('average')} ${item.averagePlacement.toFixed(2)}`)}<div class="name">${escapeHtml(meta.name || item.name || item.id)} ${typeBadge}<div class="sub">${number.format(item.sampleSize)} ${text('observations')}</div>${placementDistribution(item)}</div></div><div><span class="sub">${text('average')}</span><div class="value">${item.averagePlacement.toFixed(2)}</div></div><div><span class="sub">${text('top4')}</span><div class="value">${percent(item.top4Rate)}</div></div><div><span class="sub">${text('win')}</span><div class="value">${percent(item.winRate)}</div></div><div><span class="sub">${text('prevalence')}</span><div class="value">${percent(item.prevalence)}</div></div><div class="score" title="${text('score')}">${Math.round(item.score * 100)}</div></article>`; }).join('')}</div>`;
+  return `${resultLimitNotice(filtered.length, matching.length)}<div class="list">${filtered.map((item) => {
+    const meta = metadata(type, item.id);
+    const championEntityCost = type === 'champions' ? Number(metadata('champions', item.id).cost) : null;
+    const imageClass = type === 'items' ? 'entity-icon item-entity-icon' : type === 'champions' ? `entity-icon champion-entity-icon${championEntityCost ? ` cost-${championEntityCost}` : ''}` : 'entity-icon';
+    const typeBadge = type === 'items' ? `<span class="item-type-badge">${itemTypeLabel(itemType(item.id))}</span>` : '';
+    const components = type === 'items' ? itemComponentsView(item.id, true) : '';
+    return `<article class="row entity" tabindex="0" data-detail-type="${type}" data-detail-id="${escapeHtml(item.id)}"><div class="entity-title">${icon(type, item.id, imageClass, `${number.format(item.sampleSize)} ${text('observations')} · ${text('average')} ${item.averagePlacement.toFixed(2)}`)}<div class="name">${escapeHtml(meta.name || item.name || item.id)} ${typeBadge}<div class="sub">${number.format(item.sampleSize)} ${text('observations')}</div>${components}${placementDistribution(item)}</div></div><div><span class="sub">${text('average')}</span><div class="value">${item.averagePlacement.toFixed(2)}</div></div><div><span class="sub">${text('top4')}</span><div class="value">${percent(item.top4Rate)}</div></div><div><span class="sub">${text('win')}</span><div class="value">${percent(item.winRate)}</div></div><div><span class="sub">${text('prevalence')}</span><div class="value">${percent(item.prevalence)}</div></div><div class="score" title="${text('score')}">${Math.round(item.score * 100)}</div></article>`;
+  }).join('')}</div>`;
 }
 function compositionCard(item) {
   const expanded = state.expandedCompositions.has(item.id);
@@ -119,16 +161,18 @@ function compositionCard(item) {
   const flagship = item.flagship || item.variants[0];
   const compact = layout() === 'compact';
   const flagshipBoard = (flagship?.champions || []).map((champion) => championTile(champion, { core: true, showName: true, hideItems: true, contextId: item.id })).join('');
-  const coreBoard = item.coreChampions.map((champion) => championTile(champion, { core: true, showName: true, itemSlots: true, contextId: item.id })).join('');
+  const coreBoard = item.coreChampions.map((champion) => championTile(champion, { core: true, highlighted: true, showName: true, itemSlots: true, contextId: item.id })).join('');
   const coreById = new Map(item.coreChampions.map((champion) => [champion.id, champion]));
-  const compactChampions = [...(flagship?.champions || []), ...item.coreChampions.filter((champion) => !(flagship?.champions || []).some((flagshipChampion) => flagshipChampion.id === champion.id))];
-  const compactBoard = compactChampions.map((champion) => { const coreChampion = coreById.get(champion.id); return championTile(coreChampion ? { ...champion, ...coreChampion } : champion, { core: true, showName: true, hideItems: !coreChampion, itemSlots: Boolean(coreChampion), contextId: item.id, coreTag: Boolean(coreChampion) }); }).join('');
+  const flagshipById = new Map((flagship?.champions || []).map((champion) => [champion.id, champion]));
+  const compactCore = item.coreChampions.map((champion) => championTile({ ...(flagshipById.get(champion.id) || {}), ...champion }, { core: true, highlighted: true, showName: true, itemSlots: true, contextId: item.id })).join('');
+  const compactOthers = (flagship?.champions || []).filter((champion) => !coreById.has(champion.id)).map((champion) => championTile(champion, { core: true, showName: true, hideItems: true, contextId: item.id })).join('');
   const lineup = compact
-    ? `<div class="card-section-label compact-lineup-label">${language() === 'es' ? 'COMPOSICIÓN INSIGNIA · CORE MARCADO CON OBJETOS' : 'FLAGSHIP LINEUP · CORE MARKED WITH ITEMS'}</div><div class="portrait-strip compact-lineup">${compactBoard}</div>`
+    ? `<div class="card-section-label compact-lineup-label">${language() === 'es' ? 'COMPOSICIÓN INSIGNIA' : 'FLAGSHIP LINEUP'}</div><div class="portrait-strip compact-lineup"><span class="compact-core-group">${compactCore}</span>${compactOthers}</div>`
     : `<div class="card-section-label">${language() === 'es' ? 'COMPOSICIÓN INSIGNIA' : 'FLAGSHIP LINEUP'}</div><div class="portrait-strip flagship-strip">${flagshipBoard}</div><div class="card-section-label core-label">CORE</div><div class="portrait-strip core-strip">${coreBoard}</div>`;
   const metrics = `<div><span class="sub">${text('average')}</span><div class="value">${item.averagePlacement.toFixed(2)}</div></div><div><span class="sub">${text('top4')}</span><div class="value">${percent(item.top4Rate)}</div></div><div><span class="sub">${text('win')}</span><div class="value">${percent(item.winRate)}</div></div><div><span class="sub">${text('prevalence')}</span><div class="value">${percent(item.prevalence)}</div></div>`;
   const synergyIds = compositionParts(item).map((part) => part.id).sort((left, right) => left.localeCompare(right)).join(' ');
-  return `<article class="row comp-card layout-${layout()} ${expanded ? 'expanded' : ''}" data-synergies="${escapeHtml(synergyIds)}"><div class="comp comp-summary" tabindex="0" role="button" data-composition-id="${escapeHtml(item.id)}" aria-expanded="${expanded}"><div class="name"><div class="comp-title"><span class="trait-strip">${compositionParts(item).map((part) => icon('synergies', part.id, 'trait-icon', `${percent(part.prevalence || 0)} ${language() === 'es' ? 'del arquetipo' : 'of archetype'}`)).join('')}</span>${escapeHtml(compositionDisplayName(item))}</div>${lineup}<div class="sub">${number.format(item.sampleSize)} ${text('observations')} · ${number.format(variants)} ${text('variants')} · <span class="expand-label">${text(expanded ? 'collapse' : 'expand')}</span><div class="bar"><i style="width:${percent(item.prevalence)}"></i></div></div>${placementDistribution(item)}</div><div class="summary-metrics">${metrics}</div><div class="score-stack"><div class="score" title="${text('score')}">${Math.round(item.score * 100)}<span class="expand-chevron">${expanded ? '▴' : '▾'}</span></div><div class="card-actions">${favoriteButton('archetype', item.id)}${teamCodeButton(flagship?.champions || [])}</div></div></div>${expanded ? `<div class="comp-expansion">${compositionBreakdown(item)}</div>` : ''}</article>`;
+  const championIds = compositionChampionEntries(item).map((champion) => champion.id).sort((left, right) => left.localeCompare(right)).join(' ');
+  return `<article class="row comp-card layout-${layout()} ${expanded ? 'expanded' : ''}" data-synergies="${escapeHtml(synergyIds)}" data-champions="${escapeHtml(championIds)}"><div class="comp comp-summary" tabindex="0" role="button" data-composition-id="${escapeHtml(item.id)}" aria-expanded="${expanded}"><div class="name"><div class="comp-title"><span class="trait-strip">${compositionParts(item).map((part) => icon('synergies', part.id, 'trait-icon', `${percent(part.prevalence || 0)} ${language() === 'es' ? 'del arquetipo' : 'of archetype'}`)).join('')}</span>${escapeHtml(compositionDisplayName(item))}</div>${lineup}<div class="sub">${number.format(item.sampleSize)} ${text('observations')} · ${number.format(variants)} ${text('variants')} · <span class="expand-label">${text(expanded ? 'collapse' : 'expand')}</span><div class="bar"><i style="width:${percent(item.prevalence)}"></i></div></div>${placementDistribution(item)}</div><div class="summary-metrics">${metrics}</div><div class="score-stack"><div class="score" title="${text('score')}">${Math.round(item.score * 100)}<span class="expand-chevron">${expanded ? '▴' : '▾'}</span></div><div class="card-actions">${favoriteButton('archetype', item.id)}${teamCodeButton(flagship?.champions || [])}</div></div></div>${expanded ? `<div class="comp-expansion">${compositionBreakdown(item)}</div>` : ''}</article>`;
 }
 function home(snapshot) {
   if (!snapshot) return `<section class="empty"><div><div class="crest">◇</div><p class="eyebrow">${language() === 'es' ? 'TU META, CON DATOS REALES' : 'YOUR META, POWERED BY REAL DATA'}</p><h2>${text('noData')}</h2><p>${text('noDataDetail')}</p><button class="primary" data-open-key>${text('configure')}</button></div></section>`;
@@ -148,7 +192,10 @@ function favoriteButton(kind, compositionId, champions = [], compact = false) {
   return `<button type="button" class="favorite-toggle ${active ? 'active' : ''} ${compact ? 'compact' : ''}" data-favorite-kind="${kind}" data-favorite-composition="${escapeHtml(compositionId)}" data-favorite-lineup="${escapeHtml(championIds.join(','))}" aria-pressed="${active}" title="${title}">${active ? '★' : '☆'}</button>`;
 }
 function favoriteVariantCard(composition, variant) {
-  const board = variant.champions.map((champion) => championTile(champion, { core: true, showName: true, hideItems: true })).join('');
+  const coreIds = new Set(composition.coreChampions.map((champion) => champion.id));
+  const core = variant.champions.filter((champion) => coreIds.has(champion.id)).map((champion) => championTile(champion, { core: true, highlighted: true, showName: true, hideItems: true })).join('');
+  const others = variant.champions.filter((champion) => !coreIds.has(champion.id)).map((champion) => championTile(champion, { core: true, showName: true, hideItems: true })).join('');
+  const board = layout() === 'compact' ? `<span class="compact-core-group">${core}</span>${others}` : variant.champions.map((champion) => championTile(champion, { core: true, highlighted: coreIds.has(champion.id), showName: true, hideItems: true })).join('');
   const metrics = `<div><span class="sub">${text('average')}</span><div class="value">${variant.averagePlacement.toFixed(2)}</div></div><div><span class="sub">${text('top4')}</span><div class="value">${percent(variant.top4Rate)}</div></div><div><span class="sub">${text('win')}</span><div class="value">${percent(variant.winRate)}</div></div><div><span class="sub">${text('prevalence')}</span><div class="value">${percent(variant.prevalence)}</div></div>`;
   const synergyIds = compositionParts(composition).map((part) => part.id).sort((left, right) => left.localeCompare(right)).join(' ');
   return `<article class="row comp-card favorite-variant-card layout-${layout()}" data-synergies="${escapeHtml(synergyIds)}"><div class="comp comp-summary"><div class="name"><div class="comp-title"><span class="trait-strip">${compositionParts(composition).map((part) => icon('synergies', part.id, 'trait-icon')).join('')}</span>${language() === 'es' ? 'Variante' : 'Variant'} · ${escapeHtml(compositionDisplayName(composition))}</div><div class="card-section-label">${language() === 'es' ? 'COMPOSICIÓN GUARDADA' : 'SAVED LINEUP'}</div><div class="portrait-strip favorite-lineup">${board}</div><div class="sub">${number.format(variant.sampleSize)} ${text('observations')} · ${percent(variant.prevalence)} ${language() === 'es' ? 'del arquetipo' : 'of archetype'}</div>${placementDistribution(variant)}</div><div class="summary-metrics">${metrics}</div><div class="score-stack"><div class="score" title="${language() === 'es' ? 'Puntuación del arquetipo' : 'Archetype score'}">${Math.round(composition.score * 100)}</div><div class="card-actions">${favoriteButton('variant', composition.id, variant.champions)}${teamCodeButton(variant.champions)}</div></div></div></article>`;
@@ -350,20 +397,6 @@ function variantDiff(flagship, variant) {
 function diffChampion(champion) {
   return `<span class="diff-unit">${championTile(champion, { hideItems: true })}<small>${escapeHtml(metadata('champions', champion.id).name)}</small></span>`;
 }
-function progressionPath(entity) {
-  const progression = entity.progression;
-  if (!progression?.modeled || !progression.stages?.length) return '';
-  const stages = progression.stages.map((stage) => {
-    const evidence = stage.observedFinalBoards
-      ? stage.observedFinalBoards === 1
-        ? (language() === 'es' ? '1 cierre observado' : '1 observed final board')
-        : `${number.format(stage.observedFinalBoards)} ${language() === 'es' ? 'cierres observados' : 'observed final boards'}`
-      : (language() === 'es' ? 'sin cierres directos' : 'no direct final boards');
-    const champions = stage.champions.map((champion) => `<span class="progression-unit ${champion.core ? 'core' : ''}">${icon('champions', champion.id, 'progression-portrait', `${champion.cost} ${language() === 'es' ? 'de coste' : 'cost'} · ${percent(champion.presence)} ${language() === 'es' ? 'presencia final' : 'final presence'}`)}<span>${escapeHtml(metadata('champions', champion.id).name)}</span><b>${champion.cost}g</b></span>`).join('');
-    return `<article class="progression-stage"><header><strong>${language() === 'es' ? 'Nivel' : 'Level'} ${stage.level}</strong><span>${evidence}</span></header><div class="progression-board">${champions}</div></article>`;
-  }).join('');
-  return `<section class="inline-section progression-section"><div class="section-heading"><h3>${language() === 'es' ? 'Ruta de niveles · modelo determinista' : 'Level path · deterministic model'}</h3><span>${number.format(progression.sampleSize)} ${text('observations')}</span></div><p>${language() === 'es' ? 'Subconjuntos anidados de la composición final, calculados por CORE, coste observado y frecuencia. No es un historial por ronda.' : 'Nested subsets of the final composition, calculated from CORE, observed cost, and frequency. This is not round-by-round history.'}</p><div class="progression-grid">${stages}</div></section>`;
-}
 function compositionBreakdown(entity) {
   const [flagship, ...alternatives] = entity.variants;
   const flagshipRow = flagship ? `<article class="variant flagship"><div class="variant-copy"><b>${language() === 'es' ? 'Composición insignia' : 'Flagship lineup'}</b><span>${number.format(flagship.sampleSize)} ${text('observations')} · ${percent(flagship.prevalence)}</span><div class="variant-actions">${favoriteButton('variant', entity.id, flagship.champions, true)}${teamCodeButton(flagship.champions, true)}</div></div><div class="board">${flagship.champions.map((champion) => championTile(champion, { hideItems: true })).join('')}</div></article>` : '';
@@ -375,7 +408,7 @@ function compositionBreakdown(entity) {
   }).join('');
   const variants = `<section class="inline-section"><div class="section-heading"><h3>${language() === 'es' ? 'Variantes por cambios' : 'Variants by changes'}</h3><span>${number.format(entity.variants.length)} / ${number.format(entity.variantCount ?? entity.variants.length)}</span></div><div class="variant-list">${flagshipRow}${diffRows}</div></section>`;
   const champions = `<section class="inline-section champion-analysis"><div class="section-heading"><h3>${language() === 'es' ? 'Análisis de campeones' : 'Champion analysis'}</h3><span>${language() === 'es' ? 'Dentro de este arquetipo' : 'Inside this archetype'}</span></div><div class="detail-grid">${entity.champions.slice(0, 10).map((champion) => `<article class="detail-card contextual-detail" role="button" tabindex="0" data-composition-champion="${escapeHtml(champion.id)}" data-composition-context="${escapeHtml(entity.id)}">${championTile(champion, { hideItems: true })}<div class="name">${escapeHtml(metadata('champions', champion.id).name)}</div><div class="sub">${percent(champion.presence)} ${language() === 'es' ? 'presencia' : 'presence'} · ${champion.averageItems.toFixed(2)} ${text('items').toLowerCase()} · ${text('average')} ${champion.averagePlacement.toFixed(2)} · ${text('top4')} ${percent(champion.top4Rate)} · ${text('win')} ${percent(champion.winRate)}</div><div class="star-summary">${champion.stars.map((star) => `<span>${star.tier}★ ${percent(star.rate)}</span>`).join('')}</div><div class="board item-board">${filteredItemEntries(champion.items).slice(0, 6).map((item) => icon('items', item.id, 'item-detail-icon', `${percent(item.prevalence)} · ${number.format(item.count)} / ${number.format(item.sampleSize)} ${text('observations')}`)).join('')}</div></article>`).join('')}</div></section>`;
-  return progressionPath(entity) + champions + variants;
+  return champions + variants;
 }
 
 function itemPatternRow(pattern) {
@@ -384,21 +417,34 @@ function itemPatternRow(pattern) {
   return `<article class="loadout-row"><div class="board">${items.map((id) => icon('items', id, 'item-detail-icon', metadata('items', id).name)).join('')}</div><span>${percent(pattern.prevalence)} · ${number.format(pattern.count)} / ${number.format(pattern.sampleSize)} ${text('observations')}</span></article>`;
 }
 
+let activeCompositionChampion = null;
+function renderCompositionChampionDetail() {
+  if (!activeCompositionChampion) return;
+  const { composition, champion, evidence } = activeCompositionChampion;
+  const championId = champion.id;
+  const championMeta = metadata('champions', championId);
+  const rankedSlots = scored(filteredItemEntries(champion.itemSlots), state.championItemWeight).slice(0, 3);
+  const rankedItems = scored(filteredItemEntries(champion.items), state.championItemWeight);
+  const metrics = `<section class="detail-metrics"><span>${number.format(champion.sampleSize)} ${text('observations')}</span><span>${percent(champion.presence)} ${language() === 'es' ? 'presencia' : 'presence'}</span><span>${text('average')} <b>${champion.averagePlacement.toFixed(2)}</b></span><span>${text('top4')} <b>${percent(champion.top4Rate)}</b></span><span>${text('win')} <b>${percent(champion.winRate)}</b></span><span>${champion.averageItems.toFixed(2)} ${language() === 'es' ? 'objetos finales' : 'final items'}</span></section>`;
+  const stars = `<section class="detail-section"><h3>${language() === 'es' ? 'Distribución de estrellas' : 'Star distribution'}</h3><div class="star-summary prominent">${champion.stars.map((star) => `<span>${star.tier}★ <b>${percent(star.rate)}</b></span>`).join('')}</div></section>`;
+  const weighting = `<section class="detail-section champion-item-weighting"><div class="section-heading"><h3>${language() === 'es' ? 'Prioridad de objetos' : 'Item priority'}</h3><strong>${state.championItemWeight} / ${100 - state.championItemWeight}</strong></div><label class="slider-label"><span>${language() === 'es' ? 'Prevalencia' : 'Prevalence'}</span><input data-champion-item-weight type="range" min="0" max="100" value="${100 - state.championItemWeight}"><span>${language() === 'es' ? 'Rendimiento' : 'Performance'}</span></label><p>${language() === 'es' ? 'Reordena objetos para este campeón dentro de este arquetipo. Rendimiento usa la posición media observada de los tableros que llevaron cada objeto.' : 'Re-ranks items for this champion inside this archetype. Performance uses the observed average placement of boards carrying each item.'}</p></section>`;
+  const slots = `<section class="detail-section"><h3>${language() === 'es' ? 'Tres slots representativos' : 'Three representative slots'}</h3><p class="sub">${language() === 'es' ? 'La multiplicidad se conserva: un objeto puede aparecer dos o tres veces si los datos lo respaldan.' : 'Multiplicity is preserved: an item can appear twice or three times when supported by the data.'}</p><div class="item-analysis-grid">${rankedSlots.map((item) => `<article data-ranked-slot="${escapeHtml(`${item.id}:${item.copy}`)}" data-item-score="${item.score}">${icon('items', item.id, 'item-detail-icon', `${percent(item.prevalence)} · ${text('average')} ${item.averagePlacement.toFixed(2)}`)}<div><b>${escapeHtml(metadata('items', item.id).name)}</b><span>slot ${item.copy} · ${percent(item.prevalence)} · ${item.averagePlacement.toFixed(2)} · ${Math.round(item.score * 100)}</span></div></article>`).join('')}</div></section>`;
+  const individualItems = `<section class="detail-section"><h3>${language() === 'es' ? 'Todos los objetos dentro de la composición' : 'All items inside the composition'}</h3><div class="item-analysis-grid">${rankedItems.map((item) => `<article data-ranked-item="${escapeHtml(item.id)}" data-item-score="${item.score}" data-item-placement="${item.averagePlacement}">${icon('items', item.id, 'item-detail-icon', `${percent(item.prevalence)} · ${text('average')} ${item.averagePlacement.toFixed(2)}`)}<div><b>${escapeHtml(metadata('items', item.id).name)}</b><span>${percent(item.prevalence)} · ${item.averagePlacement.toFixed(2)} · ${number.format(item.evidenceCount)} ${text('observations')} · ${Math.round(item.score * 100)}</span></div></article>`).join('')}</div></section>`;
+  const combinations = champion.combinations.length ? `<section class="detail-section"><h3>${language() === 'es' ? 'Combinaciones frecuentes de 2' : 'Common 2-item combinations'}</h3><div class="loadout-list">${champion.combinations.map(itemPatternRow).join('')}</div></section>` : '';
+  const loadouts = champion.loadouts.length ? `<section class="detail-section"><h3>${language() === 'es' ? 'Loadouts finales frecuentes' : 'Common final loadouts'}</h3><div class="loadout-list">${champion.loadouts.map(itemPatternRow).join('')}</div></section>` : '';
+  const source = `<section class="detail-section"><h3>${text('sourceGames')} (${number.format(Math.min(evidence.length, 12))})</h3>${evidence.slice(0, 12).map((sample) => { const unit = sample.units.find((entry) => entry.id === championId); return `<article class="evidence"><div class="name">${escapeHtml(sample.playerName || '—')} · ${escapeHtml(sample.region)} · #${sample.placement}</div><div class="board">${unit ? championTile(unit) : ''}</div></article>`; }).join('')}</section>`;
+  $('#detail-body').innerHTML = `<div class="champion-modal-heading">${championTile(champion, { core: true, hideItems: true })}<div><p class="eyebrow">${language() === 'es' ? 'CAMPEÓN EN COMPOSICIÓN' : 'CHAMPION IN COMPOSITION'}</p><h2>${escapeHtml(championMeta.name || championId)}</h2><p>${escapeHtml(compositionDisplayName(composition))}</p></div></div>${metrics}${placementDistribution(champion)}${stars}${weighting}${slots}${individualItems}${combinations}${loadouts}${source}`;
+}
+
 async function openCompositionChampion(compositionId, championId) {
   const composition = state.analysis.result.compositions.find((item) => item.id === compositionId);
   const champion = composition?.champions.find((item) => item.id === championId);
   if (!composition || !champion) return;
   const snapshot = state.snapshotId ? `&snapshot=${encodeURIComponent(state.snapshotId)}` : '';
   const evidence = await api(`/api/evidence?type=composition-champion&id=${encodeURIComponent(championId)}&composition=${encodeURIComponent(compositionId)}&region=${encodeURIComponent(state.region)}${snapshot}`);
-  const championMeta = metadata('champions', championId);
-  const metrics = `<section class="detail-metrics"><span>${number.format(champion.sampleSize)} ${text('observations')}</span><span>${percent(champion.presence)} ${language() === 'es' ? 'presencia' : 'presence'}</span><span>${text('average')} <b>${champion.averagePlacement.toFixed(2)}</b></span><span>${text('top4')} <b>${percent(champion.top4Rate)}</b></span><span>${text('win')} <b>${percent(champion.winRate)}</b></span><span>${champion.averageItems.toFixed(2)} ${language() === 'es' ? 'objetos finales' : 'final items'}</span></section>`;
-  const stars = `<section class="detail-section"><h3>${language() === 'es' ? 'Distribución de estrellas' : 'Star distribution'}</h3><div class="star-summary prominent">${champion.stars.map((star) => `<span>${star.tier}★ <b>${percent(star.rate)}</b></span>`).join('')}</div></section>`;
-  const slots = `<section class="detail-section"><h3>${language() === 'es' ? 'Tres slots representativos' : 'Three representative slots'}</h3><p class="sub">${language() === 'es' ? 'La multiplicidad se conserva: un objeto puede aparecer dos o tres veces si los datos lo respaldan.' : 'Multiplicity is preserved: an item can appear twice or three times when supported by the data.'}</p><div class="item-analysis-grid">${filteredItemEntries(champion.itemSlots).map((item) => `<article>${icon('items', item.id, 'item-detail-icon', `${percent(item.prevalence)} · ${number.format(item.count)} / ${number.format(item.sampleSize)}`)}<div><b>${escapeHtml(metadata('items', item.id).name)}</b><span>slot ${item.copy} · ${percent(item.prevalence)}</span></div></article>`).join('')}</div></section>`;
-  const individualItems = `<section class="detail-section"><h3>${language() === 'es' ? 'Todos los objetos dentro de la composición' : 'All items inside the composition'}</h3><div class="item-analysis-grid">${filteredItemEntries(champion.items).map((item) => `<article>${icon('items', item.id, 'item-detail-icon', `${percent(item.prevalence)} · ${number.format(item.count)} / ${number.format(item.sampleSize)}`)}<div><b>${escapeHtml(metadata('items', item.id).name)}</b><span>${percent(item.prevalence)} · ${number.format(item.count)} / ${number.format(item.sampleSize)}</span></div></article>`).join('')}</div></section>`;
-  const combinations = champion.combinations.length ? `<section class="detail-section"><h3>${language() === 'es' ? 'Combinaciones frecuentes de 2' : 'Common 2-item combinations'}</h3><div class="loadout-list">${champion.combinations.map(itemPatternRow).join('')}</div></section>` : '';
-  const loadouts = champion.loadouts.length ? `<section class="detail-section"><h3>${language() === 'es' ? 'Loadouts finales frecuentes' : 'Common final loadouts'}</h3><div class="loadout-list">${champion.loadouts.map(itemPatternRow).join('')}</div></section>` : '';
-  const source = `<section class="detail-section"><h3>${text('sourceGames')} (${number.format(Math.min(evidence.length, 12))})</h3>${evidence.slice(0, 12).map((sample) => { const unit = sample.units.find((entry) => entry.id === championId); return `<article class="evidence"><div class="name">${escapeHtml(sample.playerName || '—')} · ${escapeHtml(sample.region)} · #${sample.placement}</div><div class="board">${unit ? championTile(unit) : ''}</div></article>`; }).join('')}</section>`;
-  $('#detail-body').innerHTML = `<div class="champion-modal-heading">${championTile(champion, { core: true, hideItems: true })}<div><p class="eyebrow">${language() === 'es' ? 'CAMPEÓN EN COMPOSICIÓN' : 'CHAMPION IN COMPOSITION'}</p><h2>${escapeHtml(championMeta.name || championId)}</h2><p>${escapeHtml(compositionDisplayName(composition))}</p></div></div>${metrics}${placementDistribution(champion)}${stars}${slots}${individualItems}${combinations}${loadouts}${source}`;
+  state.championItemWeight = 100;
+  activeCompositionChampion = { composition, champion, evidence };
+  renderCompositionChampionDetail();
   $('#detail-dialog').showModal();
 }
 
@@ -410,7 +456,8 @@ async function openDetails(type, id) {
   const meta = metadata(type, id);
   if (!entity) return;
   const summary = `<section class="detail-metrics"><span>${number.format(entity.sampleSize)} ${text('observations')}</span><span>${text('average')} <b>${entity.averagePlacement.toFixed(2)}</b></span><span>${text('top4')} <b>${percent(entity.top4Rate)}</b></span><span>${text('win')} <b>${percent(entity.winRate)}</b></span></section>${placementDistribution(entity)}`;
-  const breakdown = contextualBreakdown(type, id, evidence);
+  const components = type === 'items' && itemComponents(id).length ? `<section class="detail-section"><h3>${language() === 'es' ? 'Componentes' : 'Components'}</h3>${itemComponentsView(id)}</section>` : '';
+  const breakdown = components + contextualBreakdown(type, id, evidence);
   const evidenceDisclosure = entity.sampleSize > evidence.length ? `<p class="sub">${language() === 'es' ? `Mostrando las ${number.format(evidence.length)} partidas más recientes de ${number.format(entity.sampleSize)} observaciones.` : `Showing the ${number.format(evidence.length)} most recent games from ${number.format(entity.sampleSize)} observations.`}</p>` : '';
   $('#detail-body').innerHTML = `<p class="eyebrow">${text('evidence')}</p><h2>${escapeHtml(meta.name || id)}</h2>${summary}${breakdown}<section class="detail-section"><h3>${text('sourceGames')} (${number.format(evidence.length)})</h3>${evidenceDisclosure}${evidence.map((sample) => `<article class="evidence"><div class="name">${escapeHtml(sample.playerName || '—')} · ${escapeHtml(sample.region)} · #${sample.placement} · ${new Intl.DateTimeFormat(language(), { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(sample.recordedAt))}</div><div class="sub">${escapeHtml(sample.matchId || '')}</div><div class="board">${sample.units.map(championTile).join('')}</div></article>`).join('') || `<p>${text('noResultsDetail')}</p>`}</section>`;
   $('#detail-dialog').showModal();
@@ -430,6 +477,7 @@ async function toggleFavorite(button) {
 document.querySelector('.sidebar').addEventListener('click', (event) => { const button = event.target.closest('[data-tab]'); if (!button) return; if (button.dataset.tab === 'settings') return openSettings(); state.tab = button.dataset.tab; render(); });
 $('#search').addEventListener('input', (event) => { state.search = event.target.value; render(); });
 $('#weight').addEventListener('input', (event) => { state.weight = 100 - Number(event.target.value); $('#weight-value').textContent = `${state.weight} / ${100 - state.weight}`; render(); });
+$('#detail-body').addEventListener('input', (event) => { if (event.target.matches('[data-champion-item-weight]')) { state.championItemWeight = 100 - Number(event.target.value); renderCompositionChampionDetail(); } });
 $('#language-toggle').addEventListener('click', async () => { await api('/api/settings', { method: 'PUT', body: JSON.stringify({ language: language() === 'es' ? 'en' : 'es' }) }); await load(); });
 $('#layout-selector').addEventListener('change', async (event) => { const settings = await api('/api/settings', { method: 'PUT', body: JSON.stringify({ layout: event.target.value }) }); state.bootstrap.settings = settings; state.expandedCompositions.clear(); render(); });
 $('#region-filter').addEventListener('change', async (event) => { state.region = event.target.value; state.expandedCompositions.clear(); state.expandedInteractions.clear(); await load(); });
@@ -453,11 +501,13 @@ $('#content').addEventListener('click', async (event) => {
 $('#content').addEventListener('change', async (event) => {
   const type = event.target.dataset.itemType;
   if (type) { if (event.target.checked) state.itemTypes.add(type); else state.itemTypes.delete(type); render(); return; }
+  if (event.target.hasAttribute('data-synergy-all')) { state.selectedSynergies.clear(); state.synergyMenuOpen = true; state.expandedCompositions.clear(); render(); return; }
   const synergyId = event.target.dataset.synergyId;
-  if (synergyId) { if (event.target.checked) state.disabledSynergies.delete(synergyId); else state.disabledSynergies.add(synergyId); state.expandedCompositions.clear(); render(); return; }
+  if (synergyId) { if (event.target.checked) state.selectedSynergies.add(synergyId); else state.selectedSynergies.delete(synergyId); state.synergyMenuOpen = true; state.expandedCompositions.clear(); render(); return; }
   if (event.target.id === 'language') { await api('/api/settings', { method: 'PUT', body: JSON.stringify({ language: event.target.value }) }); await load(); }
   else if (event.target.id === 'data-pack-input' && event.target.files?.[0]) await importDataPack(event.target.files[0]);
 });
+$('#content').addEventListener('toggle', (event) => { if (event.target.matches('.synergy-filter')) state.synergyMenuOpen = event.target.open; }, true);
 $('#content').addEventListener('keydown', (event) => { if (!['Enter', ' '].includes(event.key)) return; if (event.target.matches('[data-composition-champion]')) { event.preventDefault(); void openCompositionChampion(event.target.dataset.compositionContext, event.target.dataset.compositionChampion); } else if (event.target.matches('[data-interaction-id], [data-composition-id], [data-detail-type]')) { event.preventDefault(); event.target.click(); } });
 $('#detail-dialog').addEventListener('click', (event) => { if (event.target.closest('[data-close-detail]')) $('#detail-dialog').close(); });
 $('#settings-dialog').addEventListener('close', () => render());

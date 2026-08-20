@@ -36,6 +36,10 @@ The owner can select **Settings → Export data** and distribute the generated `
 
 See [docs/ANALYTICS.md](docs/ANALYTICS.md) for composition dominance, prevalence, score, and snapshot-sufficiency methods.
 
+The bundled 0.6.7 baseline targets 24,000 ranked observations: 4,000 each from EUW, NA, KR, BR, LAN, and LAS. Challenger and Grandmaster evidence is collected first; Master is used only for any remaining regional deficit, and tier/LP provenance is retained for audit.
+
+Meta and Favorites share an All-first synergy dropdown, champion-name search covers displayed archetypes and variants, and Standard/Compact layouts preserve the same card evidence. Composition-scoped champion details default item recommendations to prevalence and provide a local prevalence/performance slider backed by that champion-item pair's observed placement within the archetype. Inferred level-by-level boards are intentionally absent because final-board match data cannot support them truthfully.
+
 ## Maintainer validation
 
 ```powershell

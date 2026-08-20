@@ -2,6 +2,8 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { REGIONS, TARGET_OBSERVATIONS_PER_REGION } from '../config.mjs';
 
+const pause = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
 export function favoriteKey(favorite) {
   return favorite.kind === 'variant' ? `variant:${favorite.compositionId}:${favorite.championIds.join('+')}` : `archetype:${favorite.compositionId}`;
 }
@@ -16,7 +18,11 @@ export function normalizeFavorite(value) {
   return { kind: 'variant', compositionId, championIds };
 }
 
-export function hasCompleteRegionalCoverage(snapshot, regions = Object.keys(REGIONS), targetPerRegion = TARGET_OBSERVATIONS_PER_REGION) {
+export function hasCompleteRegionalCoverage(snapshot, regions = Object.keys(REGIONS), targetPerRegion = snapshot?.collection?.targetPerRegion) {
+  if (!Number.isInteger(targetPerRegion) || targetPerRegion < 1) {
+    const inferred = snapshot?.observations?.length / regions.length;
+    targetPerRegion = Number.isInteger(inferred) ? inferred : TARGET_OBSERVATIONS_PER_REGION;
+  }
   if (!Array.isArray(snapshot?.observations) || snapshot.observations.length !== regions.length * targetPerRegion) return false;
   const counts = new Map(regions.map((region) => [region, 0]));
   for (const observation of snapshot.observations) if (counts.has(observation.region)) counts.set(observation.region, counts.get(observation.region) + 1);
@@ -24,11 +30,13 @@ export function hasCompleteRegionalCoverage(snapshot, regions = Object.keys(REGI
 }
 
 export class LocalStore {
-  constructor(directory) {
+  constructor(directory, { renameImpl = rename, pauseImpl = pause } = {}) {
     this.directory = directory;
     this.file = join(directory, 'state.json');
     this.state = { version: 11, settings: { language: 'es', layout: 'standard' }, favorites: [], snapshots: [], portableMetadata: {}, refreshCheckpoint: null, bundledSnapshotIds: [], bundledSnapshotHashes: {} };
     this.saveQueue = Promise.resolve();
+    this.renameFile = renameImpl;
+    this.pause = pauseImpl;
   }
 
   async load() {
@@ -41,7 +49,13 @@ export class LocalStore {
     const operation = this.saveQueue.catch(() => {}).then(async () => {
       const temporary = `${this.file}.tmp`;
       await writeFile(temporary, JSON.stringify(this.state), 'utf8');
-      await rename(temporary, this.file);
+      for (let attempt = 0; ; attempt += 1) {
+        try { await this.renameFile(temporary, this.file); break; }
+        catch (error) {
+          if (!['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt >= 5) throw error;
+          await this.pause(25 * 2 ** attempt);
+        }
+      }
     });
     this.saveQueue = operation;
     await operation;
@@ -117,7 +131,7 @@ export class LocalStore {
       importedSnapshots: additions.length,
       skippedSnapshots: snapshots.length - additions.length,
       snapshots: mergedSnapshots.length,
-      observations: mergedSnapshots.reduce((total, snapshot) => total + snapshot.observations.length, 0)
+      observations: this.latestSnapshot()?.observations.length || 0
     };
   }
   async saveRefreshCheckpoint(checkpoint) { this.state.refreshCheckpoint = checkpoint; await this.save(); }

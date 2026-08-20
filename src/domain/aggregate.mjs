@@ -1,7 +1,6 @@
 import { ANALYSIS_VERSION, activeTraits, clusterCompositions, lineupIdentity } from './composition.mjs';
 import { analyzeInteractions } from './interactions.mjs';
 import { isAnalyticItem } from './item-taxonomy.mjs';
-import { deriveModeledProgression } from './progression.mjs';
 import { scoreByPrevalenceAndPlacement } from './score.mjs';
 
 const increment = (map, key, value = 1) => map.set(key, (map.get(key) || 0) + value);
@@ -21,6 +20,11 @@ function entityMetrics(observations) {
     winRate: rate(observations, (item) => item.placement === 1),
     placementDistribution: distribution(observations)
   };
+}
+
+function evidenceMetrics(observations) {
+  const { sampleSize: evidenceCount, ...metrics } = entityMetrics(observations);
+  return { evidenceCount, ...metrics };
 }
 
 function aggregateEntities(observations, extractor, prevalenceDenominator) {
@@ -58,18 +62,29 @@ export function championDetails(observations, itemMetadata = {}) {
     }
     for (const unit of bestUnits.values()) {
       const analyticItems = unit.items.filter(analyticItem);
-      if (!champions.has(unit.id)) champions.set(unit.id, { id: unit.id, name: unit.name, samples: 0, itemTotal: 0, stars: new Map(), items: new Map(), itemSlots: new Map(), loadouts: new Map(), combinations: new Map(), observations: [] });
+      if (!champions.has(unit.id)) champions.set(unit.id, { id: unit.id, name: unit.name, samples: 0, itemTotal: 0, stars: new Map(), costs: new Map(), items: new Map(), itemSlots: new Map(), itemEvidence: new Map(), itemSlotEvidence: new Map(), loadouts: new Map(), combinations: new Map(), observations: [] });
       const champion = champions.get(unit.id);
       champion.samples += 1;
       champion.itemTotal += analyticItems.length;
       champion.observations.push(observation);
       increment(champion.stars, unit.tier);
-      new Set(analyticItems).forEach((item) => increment(champion.items, item));
+      const observedCost = Number.isFinite(Number(unit.rarity)) && Number(unit.rarity) >= 0 && Number(unit.rarity) <= 9
+        ? Number(unit.rarity) + 1
+        : Number.isFinite(Number(unit.cost)) && Number(unit.cost) >= 1 && Number(unit.cost) <= 5 ? Number(unit.cost) : null;
+      if (observedCost) increment(champion.costs, observedCost);
+      new Set(analyticItems).forEach((item) => {
+        increment(champion.items, item);
+        if (!champion.itemEvidence.has(item)) champion.itemEvidence.set(item, []);
+        champion.itemEvidence.get(item).push(observation);
+      });
       const copies = new Map();
       for (const item of analyticItems) {
         const copy = (copies.get(item) || 0) + 1;
         copies.set(item, copy);
-        increment(champion.itemSlots, `${item}::${copy}`);
+        const slot = `${item}::${copy}`;
+        increment(champion.itemSlots, slot);
+        if (!champion.itemSlotEvidence.has(slot)) champion.itemSlotEvidence.set(slot, []);
+        champion.itemSlotEvidence.get(slot).push(observation);
       }
       const loadout = [...analyticItems].sort();
       if (loadout.length) increment(champion.loadouts, loadout.join('\u001f'));
@@ -88,10 +103,11 @@ export function championDetails(observations, itemMetadata = {}) {
       presence,
       averageItems,
       coreScore: presence * (1 + (averageItems / 3)),
+      cost: [...champion.costs.entries()].sort((left, right) => right[1] - left[1] || left[0] - right[0])[0]?.[0] || null,
       ...entityMetrics(champion.observations),
       stars: [...champion.stars.entries()].map(([tier, count]) => ({ tier, rate: count / champion.samples })).sort((a, b) => a.tier - b.tier),
-      items: [...champion.items.entries()].map(([id, count]) => ({ id, prevalence: count / champion.samples, count, sampleSize: champion.samples })).sort((a, b) => b.count - a.count || a.id.localeCompare(b.id)),
-      itemSlots: [...champion.itemSlots.entries()].map(([key, count]) => { const separator = key.lastIndexOf('::'); return { id: key.slice(0, separator), copy: Number(key.slice(separator + 2)), prevalence: count / champion.samples, count, sampleSize: champion.samples }; }).sort((a, b) => b.count - a.count || a.copy - b.copy || a.id.localeCompare(b.id)).slice(0, 3),
+      items: [...champion.items.entries()].map(([id, count]) => ({ id, prevalence: count / champion.samples, count, sampleSize: champion.samples, ...evidenceMetrics(champion.itemEvidence.get(id)) })).sort((a, b) => b.count - a.count || a.id.localeCompare(b.id)),
+      itemSlots: [...champion.itemSlots.entries()].map(([key, count]) => { const separator = key.lastIndexOf('::'); return { id: key.slice(0, separator), copy: Number(key.slice(separator + 2)), prevalence: count / champion.samples, count, sampleSize: champion.samples, ...evidenceMetrics(champion.itemSlotEvidence.get(key)) }; }).sort((a, b) => b.count - a.count || a.copy - b.copy || a.id.localeCompare(b.id)),
       loadouts: [...champion.loadouts.entries()].map(([key, count]) => ({ items: key.split('\u001f'), prevalence: count / champion.samples, count, sampleSize: champion.samples })).sort((a, b) => b.count - a.count || a.items.join().localeCompare(b.items.join())).slice(0, 10),
       combinations: [...champion.combinations.entries()].map(([key, count]) => ({ items: key.split('\u001f'), prevalence: count / champion.samples, count, sampleSize: champion.samples })).sort((a, b) => b.count - a.count || a.items.join().localeCompare(b.items.join())).slice(0, 10)
     };
@@ -160,7 +176,7 @@ export function aggregate(observations, prevalenceWeight = 0.5, { traitBreakpoin
       variantCount: allVariants.length,
       variants: allVariants.slice(0, 12)
     };
-    return { ...composition, progression: deriveModeledProgression(samples, composition) };
+    return composition;
   });
   const compositionContext = (observation) => clustered.assignments[observation.id];
   const scoreEntities = (items) => scoreByPrevalenceAndPlacement(items, prevalenceWeight);

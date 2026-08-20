@@ -16,7 +16,7 @@ async function startIsolatedServer(t, prepare = async () => {}) {
   });
   t.after(async () => { child.kill(); await rm(directory, { recursive: true, force: true }); });
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Isolated server did not start.')), 8_000);
+    const timeout = setTimeout(() => reject(new Error('Isolated server did not start.')), 30_000);
     child.once('error', reject);
     child.stderr.on('data', (chunk) => reject(new Error(chunk.toString('utf8'))));
     child.stdout.on('data', (chunk) => {
@@ -26,7 +26,7 @@ async function startIsolatedServer(t, prepare = async () => {}) {
   });
 }
 
-test('installed upgrade selects the canonical 12,000 baseline while preserving a newer 11,786-record local snapshot', async (t) => {
+test('installed upgrade selects the canonical 24,000 baseline while preserving a newer 11,786-record local snapshot', async (t) => {
   const { url, directory } = await startIsolatedServer(t, async (dataDirectory) => {
     const pack = parseDataPack(await readFile(join(import.meta.dirname, '..', 'seed', 'latest-snapshot.tftpack')));
     const canonical = pack.snapshots[0];
@@ -43,8 +43,8 @@ test('installed upgrade selects the canonical 12,000 baseline while preserving a
   const snapshots = await (await fetch(`${url}/api/snapshots`)).json();
   const persisted = JSON.parse(await readFile(join(directory, 'state.json'), 'utf8'));
 
-  assert.equal(analysis.result.observations, 12_000);
-  assert.deepEqual(snapshots.map((snapshot) => snapshot.observationCount), [12_000, 11_786]);
+  assert.equal(analysis.result.observations, 24_000);
+  assert.deepEqual(snapshots.map((snapshot) => snapshot.observationCount), [24_000, 11_786]);
   assert.equal(persisted.settings.language, 'en');
   assert.equal(persisted.snapshots.length, 2);
 });
@@ -53,18 +53,18 @@ test('isolated service serves health, bootstrap, UI, and icon end to end', async
   const { url } = await startIsolatedServer(t);
   assert.deepEqual(await (await fetch(`${url}/api/health`)).json(), { ok: true, service: 'tfttool' });
   const bootstrap = await (await fetch(`${url}/api/bootstrap`)).json();
-  assert.equal(bootstrap.appVersion, '0.6.6');
+  assert.equal(bootstrap.appVersion, '0.6.7');
   assert.equal(bootstrap.settings.language, 'es');
   assert.equal(bootstrap.settings.layout, 'standard');
   assert.deepEqual(bootstrap.favorites, []);
   assert.equal(bootstrap.hasApiKey, false);
-  assert.equal(bootstrap.refresh.targetPerRegion, 2_000);
+  assert.equal(bootstrap.refresh.targetPerRegion, 4_000);
   assert.equal(bootstrap.appUpdate.state, 'idle');
-  assert.equal((await (await fetch(`${url}/api/app-update`)).json()).currentVersion, '0.6.6');
+  assert.equal((await (await fetch(`${url}/api/app-update`)).json()).currentVersion, '0.6.7');
   const analysis = await (await fetch(`${url}/api/analysis`)).json();
-  assert.equal(analysis.result.observations, 12_000);
+  assert.equal(analysis.result.observations, 24_000);
   assert.equal(analysis.result.compositions.length, 25);
-  assert.equal(analysis.result.analysisVersion, 7);
+  assert.equal(analysis.result.analysisVersion, 9);
   assert.equal(analysis.result.interactions.analysisVersion, 1);
   assert.equal(analysis.result.interactions.archetypes.length, 25);
   const missFortune = analysis.result.compositions.find((composition) => composition.id === 'core:TFT17_MissFortune+TFT17_Ornn+TFT17_Viktor');
@@ -127,7 +127,7 @@ test('isolated teammate flow exports and stages portable data without a Riot key
   const imported = await fetch(`${url}/api/data-pack/import`, { method: 'POST', headers: { 'content-type': 'application/vnd.tfttool.pack' }, body: pack });
   assert.equal(imported.status, 200);
   const importResult = await imported.json();
-  assert.equal(importResult.observations, 12_000);
+  assert.equal(importResult.observations, 24_000);
   assert.equal(importResult.importedSnapshots, 0);
   assert.equal(importResult.skippedSnapshots, 1);
   const parsed = parseDataPack(Buffer.from(pack));
@@ -143,6 +143,6 @@ test('isolated teammate flow exports and stages portable data without a Riot key
   assert.equal(bootstrap.settings.language, 'en');
   assert.equal(bootstrap.hasApiKey, false);
   const analysis = (await (await fetch(`${url}/api/analysis`)).json()).result;
-  assert.equal(analysis.observations, 12_000);
+  assert.equal(analysis.observations, 24_000);
   assert.deepEqual(analysis.interactions, beforeInteractions);
 });

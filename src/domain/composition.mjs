@@ -1,4 +1,4 @@
-export const ANALYSIS_VERSION = 7;
+export const ANALYSIS_VERSION = 9;
 
 const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
 const increment = (map, key, value = 1) => map.set(key, (map.get(key) || 0) + value);

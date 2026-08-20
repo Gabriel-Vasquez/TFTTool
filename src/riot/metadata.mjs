@@ -72,6 +72,7 @@ export class MetadataClient {
       const file = (await readdir(this.cacheDirectory)).filter((name) => name.endsWith(`-${locale}.json`) && (!line || name.startsWith(`${line}.`))).sort().at(-1);
       if (!file) return null;
       const cached = JSON.parse(await readFile(join(this.cacheDirectory, file), 'utf8'));
+      if (cached.itemTaxonomyVersion !== ITEM_TAXONOMY_VERSION) return null;
       if (locale === 'es_ES') for (const trait of Object.values(cached.traits || {})) trait.name = localizedTraitName(trait.id, trait.name, locale);
       return cached;
     } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
@@ -100,6 +101,7 @@ export class MetadataClient {
     ]);
     const traits = staticTraits(cdragon);
     const itemDefinitions = staticItems(cdragon);
+    const itemDefinitionsById = new Map(itemDefinitions.map((definition) => [definition.apiName, definition]));
     const teamPlanner = teamPlannerChampions(teamPlannerPayload);
     const dataDragonItems = Object.values(entries.find(([type]) => type === 'items')?.[1]?.data || {});
     const itemTaxonomy = classifyItemCatalog(dataDragonItems, itemDefinitions);
@@ -108,12 +110,14 @@ export class MetadataClient {
       result[type] = Object.fromEntries(Object.values(payload.data || {}).map((entry) => {
         const trait = type === 'traits' ? traits.get(entry.id) : null;
         const planner = type === 'champions' ? teamPlanner.get(entry.id) : null;
+        const itemDefinition = type === 'items' ? itemDefinitionsById.get(entry.id) : null;
         return [entry.id, {
           id: entry.id,
           name: type === 'traits' ? localizedTraitName(entry.id, trait?.name || entry.name || entry.id, locale) : entry.name || entry.id,
           description: plainDescription(trait?.desc || entry.desc || entry.description),
           image: imageUrl(version, entry),
-          ...(type === 'items' ? itemTaxonomy[entry.id] : {}),
+          ...(type === 'items' ? { ...itemTaxonomy[entry.id], components: [...(itemDefinition?.composition || [])] } : {}),
+          ...(type === 'champions' && Number.isFinite(Number(entry.tier)) ? { cost: Number(entry.tier) } : {}),
           ...(type === 'traits' ? { breakpoints: [...new Set((trait?.effects || []).map((effect) => Number(effect.minUnits)).filter((value) => value > 0))].sort((a, b) => a - b) } : {}),
           ...(planner && Number.isInteger(planner.teamPlannerCode) && planner.teamPlannerCode > 0 ? planner : {})
         }];

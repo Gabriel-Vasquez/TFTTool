@@ -9,7 +9,7 @@ const displayableUnit = (unit) => {
   return isDisplayableUnitId(id);
 };
 
-export function normalizeParticipant(match, participant, region) {
+export function normalizeParticipant(match, participant, region, ladder = {}) {
   const info = match.info || {};
   const metadata = match.metadata || {};
   const traits = (participant.traits || [])
@@ -34,6 +34,9 @@ export function normalizeParticipant(match, participant, region) {
     matchId: metadata.match_id || info.game_id || null,
     playerId: participant.puuid || null,
     playerName: participant.riotIdGameName || participant.name || 'Unknown',
+    sourceTier: ['CHALLENGER', 'GRANDMASTER', 'MASTER'].includes(ladder.tier) ? ladder.tier : null,
+    sourceLeaguePoints: Number.isFinite(Number(ladder.leaguePoints)) ? Number(ladder.leaguePoints) : null,
+    sourceRankProvenance: ladder.tier ? 'ladder_at_collection' : null,
     region,
     recordedAt: new Date(validNumber(info.game_datetime, Date.now())).toISOString(),
     patch: patchLine(info.game_version),

@@ -12,10 +12,24 @@ test('metadata resolves the matching patch and localized asset URLs', async () =
   const metadata = await new MetadataClient(fetchImpl).load('Linux Version 16.16.804.9184', 'es_ES');
   assert.equal(metadata.version, '16.16.1');
   assert.equal(metadata.items.TFT_Test.name, 'Prueba');
-  assert.equal(metadata.itemTaxonomyVersion, 2);
+  assert.equal(metadata.itemTaxonomyVersion, 3);
   assert.equal(metadata.items.TFT_Test.type, 'unknown');
   assert.match(metadata.items.TFT_Test.image, /16\.16\.1\/img\/tft-item\/Test\.png$/);
   assert.equal(metadata.items.TFT_Test.description, 'Daño adicional');
+});
+
+test('metadata preserves completed-item recipes and champion costs for presentation', async () => {
+  const fetchImpl = async (url) => {
+    if (url.endsWith('versions.json')) return { ok: true, json: async () => ['16.16.1'] };
+    if (url.endsWith('tftchampions-teamplanner.json')) return { ok: true, json: async () => ({}) };
+    if (url.includes('/cdragon/tft/')) return { ok: true, json: async () => ({ items: [{ apiName: 'Completed', name: 'Completed', composition: ['Sword', 'Tear'] }] }) };
+    if (url.endsWith('tft-item.json')) return { ok: true, json: async () => ({ data: { one: { id: 'Completed', name: 'Completed' }, two: { id: 'Sword', name: 'Sword' }, three: { id: 'Tear', name: 'Tear' } } }) };
+    if (url.endsWith('tft-champion.json')) return { ok: true, json: async () => ({ data: { one: { id: 'Champion', name: 'Champion', tier: 4 } } }) };
+    return { ok: true, json: async () => ({ data: {} }) };
+  };
+  const metadata = await new MetadataClient(fetchImpl).load('16.16', 'en_US');
+  assert.deepEqual(metadata.items.Completed.components, ['Sword', 'Tear']);
+  assert.equal(metadata.champions.Champion.cost, 4);
 });
 
 test('metadata falls back to its local cache when Data Dragon is unavailable', async () => {

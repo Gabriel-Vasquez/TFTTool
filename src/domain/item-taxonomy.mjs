@@ -1,4 +1,4 @@
-export const ITEM_TAXONOMY_VERSION = 2;
+export const ITEM_TAXONOMY_VERSION = 3;
 export const ITEM_TYPES = Object.freeze(['regular', 'component', 'emblem', 'radiant', 'artifact', 'support', 'set_mechanic', 'unknown']);
 
 const joined = (...values) => values.filter(Boolean).join(' ');

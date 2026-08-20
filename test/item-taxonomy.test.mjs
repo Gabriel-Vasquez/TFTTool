@@ -16,7 +16,7 @@ const definitions = [
 
 test('patch-agnostic taxonomy derives stable families from structural metadata', () => {
   const taxonomy = buildItemTaxonomy(definitions);
-  assert.equal(ITEM_TAXONOMY_VERSION, 2);
+  assert.equal(ITEM_TAXONOMY_VERSION, 3);
   assert.equal(taxonomy.get('BaseSword').type, 'component');
   assert.equal(taxonomy.get('BaseSword').analyticsClass, 'excluded');
   assert.equal(taxonomy.get('RegularBlade').type, 'regular');

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LocalStore } from '../src/persistence/store.mjs';
@@ -184,6 +184,7 @@ test('portable data import is atomic and merges new snapshots without deleting h
   assert.deepEqual(store.state.snapshots.map((snapshot) => snapshot.id), ['existing', 'portable']);
   assert.equal(store.state.portableMetadata.es_ES.version, '16.16.1');
   assert.equal(imported.importedSnapshots, 1);
+  assert.equal(imported.observations, replacement.observations.length);
 
   const duplicate = await store.importPortableData({ snapshots: [replacement], metadata: {} });
   assert.equal(duplicate.importedSnapshots, 0);
@@ -193,4 +194,24 @@ test('portable data import is atomic and merges new snapshots without deleting h
   store.save = async () => { throw new Error('simulated_write_failure'); };
   await assert.rejects(store.importPortableData({ snapshots: [publishableSnapshot('failed', '2026-08-21T00:00:00.000Z')], metadata: {} }), /simulated_write_failure/);
   assert.equal(store.state, before);
+});
+
+test('atomic state replacement retries transient Windows sharing violations', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'tfttool-store-rename-retry-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const waits = [];
+  let attempts = 0;
+  const store = new LocalStore(directory, {
+    pauseImpl: async (milliseconds) => waits.push(milliseconds),
+    renameImpl: async (...args) => {
+      attempts += 1;
+      if (attempts < 3) { const error = new Error('simulated sharing violation'); error.code = 'EPERM'; throw error; }
+      return rename(...args);
+    }
+  });
+  await store.load();
+  await store.updateSettings({ language: 'en' });
+  assert.equal(attempts, 3);
+  assert.deepEqual(waits, [25, 50]);
+  assert.equal(JSON.parse(await readFile(join(directory, 'state.json'), 'utf8')).settings.language, 'en');
 });

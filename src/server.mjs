@@ -9,7 +9,7 @@ import { compareSnapshots } from './domain/history.mjs';
 import { ANALYSIS_VERSION } from './domain/composition.mjs';
 import { isDisplayableUnitId } from './domain/normalization.mjs';
 import { ITEM_TAXONOMY_VERSION } from './domain/item-taxonomy.mjs';
-import { LocalStore } from './persistence/store.mjs';
+import { LocalStore, hasCompleteRegionalCoverage } from './persistence/store.mjs';
 import { createDataPack, parseDataPack } from './persistence/data-pack.mjs';
 import { importBundledSnapshot } from './persistence/seed.mjs';
 import { RiotClient } from './riot/client.mjs';
@@ -66,18 +66,25 @@ async function refresh() {
     const savedCheckpoint = store.state.refreshCheckpoint;
     const checkpointAge = savedCheckpoint?.startedAt ? Date.now() - new Date(savedCheckpoint.startedAt).getTime() : Infinity;
     const latest = store.latestSnapshot();
+    const provenanceCompatible = Boolean(latest)
+      && latest.collection?.targetPerRegion === REFRESH_TARGET_PER_REGION
+      && latest.observations.every((observation) => ['CHALLENGER', 'GRANDMASTER', 'MASTER'].includes(observation.sourceTier));
     const incrementalRegions = Object.fromEntries(Object.keys(REGIONS).map((region) => {
       const priorProgress = latest?.collection?.regions?.[region];
       return [region, {
-        observations: (latest?.observations || []).filter((observation) => observation.region === region),
+        observations: latest ? latest.observations.filter((observation) => observation.region === region) : [],
         playersScanned: 0,
         currentPatch: null,
         completed: false,
-        incremental: Boolean(latest),
+        incremental: provenanceCompatible,
+        rankBackfill: Boolean(latest) && !provenanceCompatible,
         scanLimit: Math.max(25, priorProgress?.playersScanned || 25)
       }];
     }));
-    const checkpoint = checkpointAge <= 6 * 60 * 60 * 1_000 ? savedCheckpoint : { startedAt: job.startedAt, regions: incrementalRegions };
+    const checkpointCompatible = checkpointAge <= 6 * 60 * 60 * 1_000
+      && savedCheckpoint?.targetPerRegion === REFRESH_TARGET_PER_REGION
+      && savedCheckpoint?.provenanceVersion === 3;
+    const checkpoint = checkpointCompatible ? savedCheckpoint : { startedAt: job.startedAt, targetPerRegion: REFRESH_TARGET_PER_REGION, provenanceVersion: 3, regions: incrementalRegions };
     const collectedObservations = await client.sampleAll({
       target: REFRESH_TARGET_PER_REGION,
       resume: checkpoint.regions,
@@ -87,10 +94,26 @@ async function refresh() {
     job.stage = 'processing';
     const result = analyzeCurrentSet(observations, 0.5, await analysisOptions(observations)).result;
     const sufficiency = assessSufficiency(observations, result, Object.keys(REGIONS));
-    const collection = { targetPerRegion: REFRESH_TARGET_PER_REGION, mode: latest ? 'incremental' : 'full', regions: Object.fromEntries(Object.entries(job.regions).map(([region, progress]) => [region, { playersScanned: progress.playersScanned || 0, observations: progress.observations || 0 }])) };
+    const tierSummary = (entries) => Object.fromEntries(['CHALLENGER', 'GRANDMASTER', 'MASTER'].map((tier) => {
+      const tierEntries = entries.filter((entry) => entry.sourceTier === tier);
+      const points = tierEntries.map((entry) => entry.sourceLeaguePoints).filter(Number.isFinite);
+      return [tier, { observations: tierEntries.length, minimumLeaguePoints: points.length ? Math.min(...points) : null }];
+    }));
+    const collection = {
+      targetPerRegion: REFRESH_TARGET_PER_REGION,
+      mode: provenanceCompatible ? 'incremental' : 'full',
+      tierPriority: ['CHALLENGER', 'GRANDMASTER', 'MASTER'],
+      tierBoundary: tierSummary(observations),
+      regions: Object.fromEntries(Object.entries(job.regions).map(([region, progress]) => [region, {
+        playersScanned: progress.playersScanned || 0,
+        observations: progress.observations || 0,
+        tierBoundary: tierSummary(observations.filter((entry) => entry.region === region))
+      }]))
+    };
     const snapshot = { id: crypto.randomUUID(), createdAt: new Date().toISOString(), observations, result, sufficiency, collection };
     job.stage = 'saving';
-    if (sufficiency.publishable || QA_ALLOW_SMALL_SNAPSHOTS) { await store.addSnapshot(snapshot); await portableMetadataForSnapshot(snapshot).catch(() => {}); analysisCache.clear(); }
+    const completeCoverage = hasCompleteRegionalCoverage(snapshot, Object.keys(REGIONS), REFRESH_TARGET_PER_REGION);
+    if ((sufficiency.publishable && completeCoverage) || QA_ALLOW_SMALL_SNAPSHOTS) { await store.addSnapshot(snapshot); await portableMetadataForSnapshot(snapshot).catch(() => {}); analysisCache.clear(); }
     await store.clearRefreshCheckpoint();
     job.state = 'completed'; job.stage = 'completed'; job.completedAt = new Date().toISOString(); job.sufficiency = sufficiency;
   } catch (error) { job.state = 'failed'; job.stage = 'failed'; job.error = error.message; }

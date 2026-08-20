@@ -37,7 +37,7 @@ test('home card renders the complete item-free flagship before the three-slot CO
 
 test('expanded composition shows champion analysis before flagship-relative variants', async () => {
   const app = await readFile(join(root, 'public', 'app.js'), 'utf8');
-  assert.match(app, /return progressionPath\(entity\) \+ champions \+ variants/);
+  assert.match(app, /return champions \+ variants/);
   assert.match(app, /data-composition-champion/);
   assert.match(app, /openCompositionChampion/);
   assert.match(app, /Todos los objetos dentro de la composición/);
@@ -64,6 +64,21 @@ test('slider ranking uses raw average placement and exposes exact weights', asyn
   assert.match(app, /% prevalencia · \$\{100 - state\.weight\}% posición media/);
   assert.match(app, /state\.weight = 100 - Number\(event\.target\.value\)/);
   assert.match(app, /#weight'\)\.value = String\(100 - state\.weight\)/);
+});
+
+test('composition champion detail reweights item prevalence against observed performance', async () => {
+  const [app, aggregate] = await Promise.all([
+    readFile(join(root, 'public', 'app.js'), 'utf8'),
+    readFile(join(root, 'src', 'domain', 'aggregate.mjs'), 'utf8')
+  ]);
+  assert.match(app, /championItemWeight: 100/);
+  assert.match(app, /scored\(filteredItemEntries\(champion\.itemSlots\), state\.championItemWeight\)\.slice\(0, 3\)/);
+  assert.match(app, /scored\(filteredItemEntries\(champion\.items\), state\.championItemWeight\)/);
+  assert.match(app, /data-champion-item-weight/);
+  assert.match(app, /item\.averagePlacement\.toFixed\(2\)/);
+  assert.match(aggregate, /itemEvidence: new Map\(\)/);
+  assert.match(aggregate, /evidenceMetrics\(champion\.itemEvidence\.get\(id\)\)/);
+  assert.doesNotMatch(aggregate, /itemSlots:.*slice\(0, 3\)/);
 });
 
 test('language switching requests official en-US or Spain Spanish metadata immediately', async () => {
@@ -139,17 +154,15 @@ test('item filters are shared by item, meta, champion, synergy, and interaction 
   assert.match(css, /\.item-type-filter,\.synergy-filter\{/);
 });
 
-test('expanded archetypes disclose the deterministic modeled level path without claiming round history', async () => {
+test('expanded archetypes contain no inferred level-by-level board model', async () => {
   const [app, css] = await Promise.all([
     readFile(join(root, 'public', 'app.js'), 'utf8'),
     readFile(join(root, 'public', 'app.css'), 'utf8')
   ]);
-  assert.match(app, /function progressionPath/);
-  assert.match(app, /Ruta de niveles · modelo determinista/);
-  assert.match(app, /No es un historial por ronda/);
-  assert.match(app, /progression\.stages\.map/);
-  assert.match(css, /\.progression-grid\{/);
-  assert.match(css, /\.progression-unit\.core/);
+  assert.doesNotMatch(app, /function progressionPath/);
+  assert.doesNotMatch(app, /progression\.stages/);
+  assert.doesNotMatch(app, /Level path|Ruta de niveles/);
+  assert.doesNotMatch(css, /\.progression-(?:grid|stage|unit|portrait)/);
 });
 
 test('meta layout selector persists Standard or Compact while Compact keeps every card metric', async () => {
@@ -164,12 +177,14 @@ test('meta layout selector persists Standard or Compact while Compact keeps ever
   assert.match(html, /value="compact"/);
   assert.match(app, /JSON\.stringify\(\{ layout: event\.target\.value \}\)/);
   assert.match(app, /layout-\$\{layout\(\)\}/);
-  assert.match(app, /compact-core/);
+  assert.match(app, /compact-core-group/);
+  assert.doesNotMatch(app, /coreTag/);
   assert.match(app, /summary-metrics/);
   assert.match(app, /placementDistribution\(item\)/);
   assert.match(app, /teamCodeButton\(flagship\?\.champions \|\| \[\]\)/);
   assert.match(css, /\.composition-list\.layout-compact/);
-  assert.match(css, /\.core-tag\{/);
+  assert.match(css, /\.compact-core-group\{/);
+  assert.match(css, /\.composition-list\.layout-compact\{grid-template-columns:1fr/);
   assert.match(store, /layout: 'standard'/);
 });
 
@@ -243,14 +258,45 @@ test('Meta synergy filters are data-derived, deterministic, and card-scoped', as
   ]);
   assert.match(app, /new Set\(\(state\.analysis\?\.result\?\.compositions \|\| \[\]\)\.flatMap/);
   assert.match(app, /\.sort\(\(left, right\) => metadata\('synergies', left\)\.name\.localeCompare/);
-  assert.match(app, /function compositionAllowed\(composition\) \{ return compositionParts\(composition\)\.every/);
+  assert.match(app, /state\.selectedSynergies\.size/);
+  assert.match(app, /\[\.\.\.state\.selectedSynergies\]\.every/);
   assert.match(app, /result\.compositions\.filter\(compositionAllowed\)/);
+  assert.match(app, /data-synergy-all/);
   assert.match(app, /data-synergy-id=/);
-  assert.match(app, /state\.disabledSynergies\.add\(synergyId\)/);
+  assert.match(app, /state\.selectedSynergies\.add\(synergyId\)/);
   assert.match(app, /data-synergies=/);
   assert.match(app, /matchingCompositions\.length === result\.compositions\.length/);
   assert.match(css, /\.synergy-filter/);
   assert.match(css, /\.synergy-filter-icon/);
+  assert.match(css, /\.synergy-options/);
+});
+
+test('Meta search matches displayed composition champions without auxiliary-model false positives', async () => {
+  const app = await readFile(join(root, 'public', 'app.js'), 'utf8');
+  assert.match(app, /function compositionChampionEntries/);
+  assert.match(app, /\(item\.variants \|\| \[\]\)\.flatMap\(\(variant\) => variant\.champions \|\| \[\]\)/);
+  assert.doesNotMatch(app.match(/function compositionChampionEntries[\s\S]*?\n\}/)?.[0] || '', /item\.champions/);
+  assert.match(app, /type === 'composition' \? compositionSearchText\(item\)/);
+  assert.doesNotMatch(app, /`\$\{JSON\.stringify\(item\)\} \$\{type === 'composition'/);
+  assert.match(app, /data-champions=/);
+});
+
+test('champion cost borders, brilliant CORE treatment, and item components are visible contracts', async () => {
+  const [app, css, metadata] = await Promise.all([
+    readFile(join(root, 'public', 'app.js'), 'utf8'),
+    readFile(join(root, 'public', 'app.css'), 'utf8'),
+    readFile(join(root, 'src', 'riot', 'metadata.mjs'), 'utf8')
+  ]);
+  assert.match(app, /function championCost/);
+  assert.match(app, /highlighted-core/);
+  assert.match(css, /\.champion-tile\.cost-1/);
+  assert.match(css, /\.champion-tile\.cost-2/);
+  assert.match(css, /\.champion-tile\.cost-3/);
+  assert.match(css, /\.champion-tile\.cost-4 \.champion-portrait,\.champion-tile\.cost-5/);
+  assert.match(css, /\.highlighted-core \.champion-portrait/);
+  assert.match(app, /function itemComponentsView/);
+  assert.match(app, /type === 'items' \? itemComponentsView/);
+  assert.match(metadata, /components: \[\.\.\.\(itemDefinition\?\.composition \|\| \[\]\)\]/);
 });
 
 test('archetypes and exact variants persist into a local Favorites meta tab', async () => {

@@ -72,6 +72,20 @@ test('global-style champion item prevalence deduplicates boards while loadout sl
   assert.deepEqual(details.find((champion) => champion.id === 'A').loadouts[0].items, ['Item', 'Item', 'Other']);
 });
 
+test('composition-scoped champion items retain deterministic performance evidence for weighting', () => {
+  const champion = championDetails([
+    observation('win', 1, [unit('A', ['WinItem', 'SharedItem'])]),
+    observation('loss', 8, [unit('A', ['LossItem', 'SharedItem'])])
+  ]).find((entry) => entry.id === 'A');
+  const byId = new Map(champion.items.map((item) => [item.id, item]));
+  assert.equal(byId.get('WinItem').averagePlacement, 1);
+  assert.equal(byId.get('LossItem').averagePlacement, 8);
+  assert.equal(byId.get('SharedItem').averagePlacement, 4.5);
+  assert.equal(byId.get('WinItem').evidenceCount, 1);
+  assert.equal(byId.get('WinItem').sampleSize, 2);
+  assert.ok(champion.itemSlots.every((item) => Number.isFinite(item.averagePlacement)));
+});
+
 test('Anima Squad progression items are excluded from analytics without mutating raw observations', () => {
   const animaItem = 'TFT17_AnimaSquadItem_Tier3_Annihilator';
   const emblem = 'TFT17_Item_AnimaSquadEmblemItem';

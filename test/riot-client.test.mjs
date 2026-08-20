@@ -13,20 +13,126 @@ test('sampler uses the ladder PUUID directly and collects a current ranked board
   const observations = await client.sampleRegion('EUW', { target: 1 });
   assert.equal(observations.length, 1);
   assert.equal(observations[0].matchId, 'EUW1_match');
+  assert.equal(observations[0].sourceTier, 'CHALLENGER');
+  assert.equal(observations[0].sourceLeaguePoints, 1000);
 });
 
 test('sampler harvests separate elite-player boards from one fetched match', async () => {
   let matchListRequests = 0;
+  let matchDetailRequests = 0;
   const client = new RiotClient('test');
-  client.challengerPlayers = async () => [{ puuid: 'player-1' }, { puuid: 'player-2' }];
+  client.challengerPlayers = async () => [{ puuid: 'player-1', tier: 'CHALLENGER', leaguePoints: 1000 }, { puuid: 'player-2', tier: 'GRANDMASTER', leaguePoints: 700 }];
   client.matchIds = async () => { matchListRequests += 1; return ['EUW1_shared']; };
-  client.match = async () => ({
+  client.match = async () => { matchDetailRequests += 1; return ({
     metadata: { match_id: 'EUW1_shared' },
     info: { queue_id: 1100, game_datetime: Date.now(), game_version: '16.16.1', participants: [{ puuid: 'player-1', placement: 1, traits: [], units: [] }, { puuid: 'player-2', placement: 2, traits: [], units: [] }, { puuid: 'not-ranked', placement: 3, traits: [], units: [] }] }
-  });
+  }); };
   const observations = await client.sampleRegion('EUW', { target: 2 });
   assert.deepEqual(observations.map((item) => item.playerId), ['player-1', 'player-2']);
-  assert.equal(matchListRequests, 1);
+  assert.equal(matchListRequests, 2);
+  assert.equal(matchDetailRequests, 1);
+});
+
+test('sampler exhausts Challenger and Grandmaster evidence before admitting Master fallback boards', async () => {
+  const scanned = [];
+  const players = [
+    { puuid: 'challenger', tier: 'CHALLENGER', leaguePoints: 1200 },
+    { puuid: 'grandmaster', tier: 'GRANDMASTER', leaguePoints: 650 },
+    { puuid: 'master', tier: 'MASTER', leaguePoints: 200 }
+  ];
+  const client = new RiotClient('test');
+  client.challengerPlayers = async () => players;
+  client.matchIds = async (region, puuid) => { scanned.push(puuid); return puuid === 'master' ? ['master-match'] : ['primary-match']; };
+  client.match = async (region, id) => ({
+    metadata: { match_id: id },
+    info: {
+      queue_id: 1100,
+      game_datetime: Date.now(),
+      game_version: '16.16.1',
+      participants: id === 'primary-match'
+        ? players.slice(0, 2).map((player, index) => ({ puuid: player.puuid, placement: index + 1, traits: [], units: [] }))
+        : [{ puuid: 'master', placement: 1, traits: [], units: [] }]
+    }
+  });
+
+  const primaryOnly = await client.sampleRegion('EUW', { target: 2 });
+  assert.deepEqual(primaryOnly.map((entry) => entry.sourceTier), ['CHALLENGER', 'GRANDMASTER']);
+  assert.deepEqual(scanned, ['challenger', 'grandmaster']);
+
+  scanned.length = 0;
+  const withFallback = await client.sampleRegion('EUW', { target: 3 });
+  assert.deepEqual(withFallback.map((entry) => entry.sourceTier).sort(), ['CHALLENGER', 'GRANDMASTER', 'MASTER']);
+  assert.deepEqual(scanned, ['challenger', 'grandmaster', 'master']);
+});
+
+test('full sampling analyzes deterministic elite batches before discovering more players', async () => {
+  const players = Array.from({ length: 101 }, (_, index) => ({ puuid: `elite-${index}`, tier: 'GRANDMASTER', leaguePoints: 900 - index }));
+  const listed = [];
+  const client = new RiotClient('test');
+  client.challengerPlayers = async () => players;
+  client.matchIds = async (region, puuid) => { listed.push(puuid); return puuid === 'elite-0' ? ['enough'] : []; };
+  client.match = async () => ({
+    metadata: { match_id: 'enough' },
+    info: { queue_id: 1100, game_datetime: Date.now(), game_version: '16.16.1', participants: [{ puuid: 'elite-0', placement: 1, traits: [], units: [] }] }
+  });
+
+  const observations = await client.sampleRegion('EUW', { target: 1 });
+  assert.equal(observations.length, 1);
+  assert.equal(listed.length, 100);
+  assert.equal(listed.includes('elite-100'), false);
+});
+
+test('resumed sampling recency-sorts only the unprocessed candidate tail', async () => {
+  const players = Array.from({ length: 3 }, (_, index) => ({ puuid: `elite-${index}`, tier: 'GRANDMASTER', leaguePoints: 900 - index }));
+  const fetched = [];
+  const client = new RiotClient('test');
+  client.challengerPlayers = async () => players;
+  client.matchIds = async () => { throw new Error('saved candidates already cover the scanned ladder'); };
+  client.match = async (region, id) => {
+    fetched.push(id);
+    return { metadata: { match_id: id }, info: { queue_id: 1100, game_datetime: Date.now(), game_version: '16.16.1', participants: [{ puuid: 'elite-0', placement: 1, traits: [], units: [] }] } };
+  };
+
+  const observations = await client.sampleRegion('EUW', { target: 1, resume: {
+    phasePriority: 1,
+    playersScanned: players.length,
+    candidateOffset: 1,
+    candidateMatches: [['EUW1_100', 9], ['EUW1_101', 8], ['EUW1_300', 1]]
+  } });
+  assert.equal(observations.length, 1);
+  assert.deepEqual(fetched, ['EUW1_300']);
+});
+
+test('legacy boards are rank-backfilled only when still Challenger or Grandmaster', async () => {
+  const now = new Date().toISOString();
+  const client = new RiotClient('test');
+  client.challengerPlayers = async () => [
+    { puuid: 'grandmaster', tier: 'GRANDMASTER', leaguePoints: 601 },
+    { puuid: 'master', tier: 'MASTER', leaguePoints: 99 }
+  ];
+  client.matchIds = async () => { throw new Error('confirmed primary legacy evidence already satisfies the target'); };
+  const observations = await client.sampleRegion('EUW', { target: 1, resume: {
+    rankBackfill: true,
+    observations: [
+      { id: 'legacy-gm', matchId: 'gm-match', playerId: 'grandmaster', region: 'EUW', recordedAt: now, patch: '16.16', units: [], traits: [] },
+      { id: 'legacy-master', matchId: 'master-match', playerId: 'master', region: 'EUW', recordedAt: now, patch: '16.16', units: [], traits: [] }
+    ]
+  } });
+  assert.equal(observations.length, 1);
+  assert.equal(observations[0].sourceTier, 'GRANDMASTER');
+  assert.equal(observations[0].sourceLeaguePoints, 601);
+  assert.equal(observations[0].sourceRankProvenance, 'current_ladder_backfill');
+});
+
+test('full refresh discovery starts at retained current-patch evidence instead of the prior patch window', async () => {
+  const retainedAt = Date.now() - 3_600_000;
+  let requestedStartTime;
+  const client = new RiotClient('test');
+  client.challengerPlayers = async () => [{ puuid: 'elite', tier: 'CHALLENGER', leaguePoints: 1000 }];
+  client.matchIds = async (region, puuid, options) => { requestedStartTime = options.startTime; return []; };
+  const retained = { id: 'retained:elite', matchId: 'retained', playerId: 'elite', region: 'EUW', recordedAt: new Date(retainedAt).toISOString(), patch: '16.16', sourceTier: 'CHALLENGER', sourceLeaguePoints: 1000, placement: 1, units: [], traits: [], augments: [] };
+  await client.sampleRegion('EUW', { target: 2, resume: { observations: [retained], currentPatch: '16.16' } });
+  assert.equal(requestedStartTime, Math.floor((retainedAt - 60_000) / 1_000));
 });
 
 test('incremental match discovery asks Riot only for matches after the retained sample', async () => {
@@ -42,7 +148,7 @@ test('incremental sampling fetches only unseen match details and retains the new
   const existing = { id: 'known:player-1', matchId: 'known', playerId: 'player-1', region: 'EUW', recordedAt: new Date(now - 60_000).toISOString(), patch: '16.16', placement: 4, units: [], traits: [], augments: [] };
   const fetched = [];
   const client = new RiotClient('test');
-  client.challengerPlayers = async () => [{ puuid: 'player-1' }];
+  client.challengerPlayers = async () => [{ puuid: 'player-1', tier: 'CHALLENGER', leaguePoints: 1000 }];
   client.matchIds = async () => ['new', 'known'];
   client.match = async (region, id) => {
     fetched.push(id);
@@ -58,7 +164,7 @@ test('incremental sampling fetches only unseen match details and retains the new
 test('incremental sampling performs no detail fetch when every listed match is already represented', async () => {
   const existing = { id: 'known:player-1', matchId: 'known', playerId: 'player-1', region: 'EUW', recordedAt: new Date().toISOString(), patch: '16.16', placement: 4, units: [], traits: [], augments: [] };
   const client = new RiotClient('test');
-  client.challengerPlayers = async () => [{ puuid: 'player-1' }];
+  client.challengerPlayers = async () => [{ puuid: 'player-1', tier: 'CHALLENGER', leaguePoints: 1000 }];
   client.matchIds = async () => ['known'];
   client.match = async () => { throw new Error('known match details must not be fetched'); };
 
