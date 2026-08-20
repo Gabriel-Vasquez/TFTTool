@@ -144,6 +144,31 @@ export function deriveTraitBreakpoints(observations) {
   return Object.fromEntries(Object.entries(result).map(([id, thresholds]) => [id, [...new Set(thresholds)].sort((a, b) => a - b)]));
 }
 
+export const EMBLEM_REQUIREMENT_MIN_SAMPLES = 30;
+export const EMBLEM_REQUIREMENT_RATE = 0.95;
+
+export function emblemRequirement(samples, itemMetadata = {}) {
+  if (!samples.length) return { emblemRate: 0, requiredEmblemId: null, requiredEmblemCount: 0, requiredEmblemRate: 0, requiresEmblem: false };
+  const counts = new Map();
+  let observationsWithEmblem = 0;
+  for (const observation of samples) {
+    const emblems = [...new Set(observation.units.flatMap((unit) => unit.items.filter((item) => isEmblemItem(item, itemMetadata))))];
+    if (emblems.length) observationsWithEmblem += 1;
+    for (const id of emblems) counts.set(id, (counts.get(id) || 0) + 1);
+  }
+  const dominant = [...counts.entries()].map(([id, count]) => ({ id, count })).sort((a, b) => b.count - a.count || a.id.localeCompare(b.id))[0] || null;
+  const sampleSize = samples.length;
+  const requiredEmblemRate = dominant ? dominant.count / sampleSize : 0;
+  const requiresEmblem = Boolean(dominant) && (dominant.count === sampleSize || (sampleSize >= EMBLEM_REQUIREMENT_MIN_SAMPLES && requiredEmblemRate >= EMBLEM_REQUIREMENT_RATE));
+  return {
+    emblemRate: observationsWithEmblem / sampleSize,
+    requiredEmblemId: dominant?.id || null,
+    requiredEmblemCount: dominant?.count || 0,
+    requiredEmblemRate,
+    requiresEmblem
+  };
+}
+
 export function aggregate(observations, prevalenceWeight = 0.5, { traitBreakpoints = {}, itemMetadata = {} } = {}) {
   if (!Object.keys(traitBreakpoints).length) traitBreakpoints = deriveTraitBreakpoints(observations);
   const clustered = clusterCompositions(observations, { traitBreakpoints });
@@ -160,13 +185,11 @@ export function aggregate(observations, prevalenceWeight = 0.5, { traitBreakpoin
     }
     const allVariants = [...variantGroups.entries()].map(([id, variantSamples]) => {
       const variantChampions = championDetails(variantSamples, itemMetadata);
-      const emblemObservations = variantSamples.filter((observation) => observation.units.some((unit) => unit.items.some((item) => isEmblemItem(item, itemMetadata)))).length;
       return {
         id,
         prevalence: variantSamples.length / samples.length,
         ...entityMetrics(variantSamples),
-        emblemRate: emblemObservations / variantSamples.length,
-        requiresEmblem: emblemObservations === variantSamples.length,
+        ...emblemRequirement(variantSamples, itemMetadata),
         coreChampions: variantChampions.slice(0, 3),
         champions: variantChampions
       };

@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { APP_VERSION, REGIONS, TARGET_OBSERVATIONS_PER_REGION, dataDirectory } from '../src/config.mjs';
+import { analyzeCurrentSet } from '../src/domain/analysis.mjs';
+import { ANALYSIS_VERSION } from '../src/domain/composition.mjs';
 import { ITEM_TAXONOMY_VERSION } from '../src/domain/item-taxonomy.mjs';
 import { createDataPack, parseDataPack } from '../src/persistence/data-pack.mjs';
 
@@ -20,7 +22,7 @@ if (!await exists(sourceFile)) {
 }
 
 const source = parseDataPack(await readFile(sourceFile));
-const snapshot = [...source.snapshots]
+let snapshot = [...source.snapshots]
   .filter((candidate) => candidate?.sufficiency?.publishable === true)
   .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))[0];
 if (!snapshot) throw new Error('The staged export has no publishable snapshot.');
@@ -31,6 +33,11 @@ for (const [region, count] of Object.entries(regionalCounts)) if (count !== TARG
 if (snapshot.observations.length !== TARGET_OBSERVATIONS_PER_REGION * expectedRegions.length) throw new Error('The staged export is not the complete six-region dataset.');
 if (!source.metadata?.es_ES || !source.metadata?.en_US) throw new Error('The staged export requires Spanish and English metadata.');
 if (source.metadata.es_ES.itemTaxonomyVersion !== ITEM_TAXONOMY_VERSION || source.metadata.en_US.itemTaxonomyVersion !== ITEM_TAXONOMY_VERSION) throw new Error('The staged export item taxonomy is outdated; export once from the current TFTTool release.');
+if (snapshot.result?.analysisVersion !== ANALYSIS_VERSION) {
+  const traitBreakpoints = Object.fromEntries(Object.values(source.metadata.es_ES.traits || {}).filter((trait) => trait.breakpoints?.length).map((trait) => [trait.id, trait.breakpoints]));
+  const analyzed = analyzeCurrentSet(snapshot.observations, 0.5, { traitBreakpoints, itemMetadata: source.metadata.es_ES.items || {} });
+  snapshot = { ...snapshot, observations: analyzed.observations, result: analyzed.result };
+}
 
 const pack = createDataPack({ snapshots: [snapshot], metadata: source.metadata, appVersion: APP_VERSION });
 const manifest = {

@@ -227,6 +227,8 @@ test('portable export stages the same pack for the automatic release-data pipeli
   assert.equal(JSON.parse(packageText).scripts['prebuild:win'], 'node scripts/sync-release-data.mjs');
   assert.match(syncScript, /ITEM_TAXONOMY_VERSION/);
   assert.match(syncScript, /TARGET_OBSERVATIONS_PER_REGION/);
+  assert.match(syncScript, /ANALYSIS_VERSION/);
+  assert.match(syncScript, /analyzeCurrentSet/);
 });
 
 test('variant delta columns use symmetrical fixed geometry', async () => {

@@ -119,7 +119,7 @@ test('every exact variant derives its own deterministic three-champion itemized 
   assert.deepEqual(reversed.compositions.flatMap((composition) => composition.variants.map((variant) => [variant.id, variant.coreChampions.map((champion) => champion.id)])), variants.map((variant) => [variant.id, variant.coreChampions.map((champion) => champion.id)]));
 });
 
-test('emblem labels require every real observation of the exact variant and flow only from the flagship to the archetype', () => {
+test('emblem labels use one dominant emblem with deterministic support and telemetry tolerance', () => {
   const itemMetadata = { FutureTraitEmblemItem: { type: 'emblem', analyticsClass: 'contextual' }, RegularItem: { type: 'regular', analyticsClass: 'comparable' } };
   const allEmblem = [
     observation('emblem-1', 1, [unit('A', ['FutureTraitEmblemItem']), unit('B', ['RegularItem']), unit('C', ['RegularItem'])]),
@@ -134,6 +134,23 @@ test('emblem labels require every real observation of the exact variant and flow
   assert.equal(optional.compositions[0].flagship.requiresEmblem, false);
   assert.equal(optional.compositions[0].flagship.emblemRate, 2 / 3);
   assert.equal(optional.compositions[0].requiresEmblem, false);
+
+  const telemetryTolerant = Array.from({ length: 130 }, (_, index) => observation(`tolerant-${index}`, (index % 8) + 1, [
+    unit('A', index < 127 ? ['FutureTraitEmblemItem'] : index === 127 ? ['OtherTraitEmblemItem'] : ['RegularItem']),
+    unit('B', ['RegularItem']),
+    unit('C', ['RegularItem'])
+  ]));
+  const tolerantMetadata = { ...itemMetadata, OtherTraitEmblemItem: { type: 'emblem', analyticsClass: 'contextual' } };
+  const tolerant = aggregate(telemetryTolerant, 0.5, { itemMetadata: tolerantMetadata }).compositions[0].flagship;
+  assert.equal(tolerant.requiresEmblem, true);
+  assert.equal(tolerant.emblemRate, 128 / 130);
+  assert.equal(tolerant.requiredEmblemId, 'FutureTraitEmblemItem');
+  assert.equal(tolerant.requiredEmblemCount, 127);
+  assert.equal(tolerant.requiredEmblemRate, 127 / 130);
+
+  const lowSupport = aggregate(telemetryTolerant.slice(0, 29).map((sample, index) => index === 28 ? { ...sample, units: [unit('A', ['RegularItem']), unit('B', ['RegularItem']), unit('C', ['RegularItem'])] } : sample), 0.5, { itemMetadata: tolerantMetadata }).compositions[0].flagship;
+  assert.equal(lowSupport.requiredEmblemRate, 28 / 29);
+  assert.equal(lowSupport.requiresEmblem, false);
 });
 
 test('empty final boards remain counted in the archetype but are not presented as importable variants', () => {

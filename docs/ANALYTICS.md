@@ -14,7 +14,7 @@ Champion builds use a separate slot-frequency pipeline. Individual-item prevalen
 
 The most frequent exact lineup is the archetype's flagship. The first expanded row shows that reference once; every other displayed variant is expressed only as champions removed from and added to the flagship, avoiding repeated full-team lists. Each exact lineup independently ranks its own three item-invested CORE champions from only that variant's observations and displays their three representative item slots; it never inherits the archetype-level CORE by identity.
 
-Emblem identification is metadata-first and patch agnostic. An exact variant receives `[Emblema]` only when every one of its real observations contains an emblem on at least one champion. The archetype receives the same marker only when its most-played flagship variant satisfies that strict condition. Optional-emblem and emblem-free variants remain unmarked.
+Emblem identification is metadata-first, patch agnostic, and based on the single dominant emblem for each exact lineup. Universal evidence always receives `[Emblema]`; lineups with at least 30 observations also qualify when the same emblem appears in at least 95%, which tolerates sparse Riot item-slot omissions without treating incidental mixed emblems as required. The archetype receives the marker only when its most-played flagship satisfies the same deterministic rule. Optional-emblem and emblem-free variants remain unmarked.
 
 ## Set transitions
 
