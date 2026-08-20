@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { APP_VERSION, PREFERRED_PORT, QA_ALLOW_SMALL_SNAPSHOTS, REFRESH_TARGET_PER_REGION, REGIONS, dataDirectory } from './config.mjs';
 import { aggregate } from './domain/aggregate.mjs';
@@ -8,6 +8,7 @@ import { assessSufficiency } from './domain/stability.mjs';
 import { compareSnapshots } from './domain/history.mjs';
 import { ANALYSIS_VERSION } from './domain/composition.mjs';
 import { isDisplayableUnitId } from './domain/normalization.mjs';
+import { ITEM_TAXONOMY_VERSION } from './domain/item-taxonomy.mjs';
 import { LocalStore } from './persistence/store.mjs';
 import { createDataPack, parseDataPack } from './persistence/data-pack.mjs';
 import { importBundledSnapshot } from './persistence/seed.mjs';
@@ -34,7 +35,7 @@ function metadataBreakpoints(value) {
 function portableMetadata(locale, patch) {
   const value = store.state.portableMetadata?.[locale];
   const line = String(patch || '').match(/\b\d+\.\d+\b/)?.[0];
-  return value && (!line || String(value.version || '').startsWith(`${line}.`)) ? value : null;
+  return value && value.itemTaxonomyVersion === ITEM_TAXONOMY_VERSION && (!line || String(value.version || '').startsWith(`${line}.`)) ? value : null;
 }
 
 async function metadataFor(patch, locale) {
@@ -52,7 +53,7 @@ async function portableMetadataForSnapshot(snapshot) {
 async function analysisOptions(observations) {
   try {
     const localized = await metadataFor(observations[0]?.gameVersion || observations[0]?.patch, 'es_ES');
-    return { traitBreakpoints: metadataBreakpoints(localized) };
+    return { traitBreakpoints: metadataBreakpoints(localized), itemMetadata: localized.items || {} };
   } catch { return {}; }
 }
 
@@ -119,7 +120,7 @@ function resultFor(snapshot, region = 'GLOBAL') {
   const key = `${snapshot.id}:${region}`;
   if (!analysisCache.has(key)) {
     const observations = snapshot.observations.filter((item) => item.region === region);
-    analysisCache.set(key, aggregate(observations, 0.5, { traitBreakpoints: snapshot.result.traitBreakpoints || {} }));
+    analysisCache.set(key, aggregate(observations, 0.5, { traitBreakpoints: snapshot.result.traitBreakpoints || {}, itemMetadata: store.state.portableMetadata?.es_ES?.items || {} }));
   }
   return analysisCache.get(key);
 }
@@ -198,6 +199,11 @@ export async function createTftServer({ onShutdown = () => {}, onInstallUpdate =
       if (!latest) return json(response, 404, { error: 'DATA_PACK_EMPTY' });
       const portable = await portableMetadataForSnapshot(latest);
       const pack = createDataPack({ snapshots: store.state.snapshots, metadata: portable, appVersion: APP_VERSION });
+      const publisherDirectory = join(dataDirectory, 'publisher');
+      const publisherFile = join(publisherDirectory, 'latest-export.tftpack');
+      await mkdir(publisherDirectory, { recursive: true });
+      await writeFile(`${publisherFile}.tmp`, pack);
+      await rename(`${publisherFile}.tmp`, publisherFile);
       const stamp = new Date().toISOString().slice(0, 10);
       response.writeHead(200, { 'content-type': 'application/vnd.tfttool.pack', 'content-disposition': `attachment; filename="TFTTool-${stamp}.tftpack"`, 'content-length': pack.length, 'cache-control': 'no-store' });
       response.end(pack);
@@ -206,7 +212,8 @@ export async function createTftServer({ onShutdown = () => {}, onInstallUpdate =
     if (request.method === 'POST' && url.pathname === '/api/data-pack/import') {
       const pack = parseDataPack(await binaryBody(request));
       const traitBreakpoints = metadataBreakpoints(pack.metadata.es_ES);
-      for (const snapshot of pack.snapshots) if (snapshot.result?.analysisVersion !== ANALYSIS_VERSION) { const analyzed = analyzeCurrentSet(snapshot.observations, 0.5, { traitBreakpoints }); snapshot.observations = analyzed.observations; snapshot.result = analyzed.result; }
+      const itemMetadata = pack.metadata.es_ES?.items || {};
+      for (const snapshot of pack.snapshots) if (snapshot.result?.analysisVersion !== ANALYSIS_VERSION) { const analyzed = analyzeCurrentSet(snapshot.observations, 0.5, { traitBreakpoints, itemMetadata }); snapshot.observations = analyzed.observations; snapshot.result = analyzed.result; }
       const imported = await store.importPortableData({ snapshots: pack.snapshots, metadata: pack.metadata });
       analysisCache.clear();
       return json(response, 200, { ...imported, manifest: pack.manifest });

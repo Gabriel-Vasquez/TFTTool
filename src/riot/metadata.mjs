@@ -1,5 +1,6 @@
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { ITEM_TAXONOMY_VERSION, classifyItemCatalog } from '../domain/item-taxonomy.mjs';
 
 const base = 'https://ddragon.leagueoflegends.com';
 const communityBase = 'https://raw.communitydragon.org';
@@ -35,6 +36,10 @@ function localizedTraitName(id, fallback, locale) {
 function staticTraits(payload) {
   const sets = [...(payload?.setData || []), ...Object.values(payload?.sets || {})];
   return new Map(sets.flatMap((set) => set?.traits || []).filter((trait) => trait.apiName).map((trait) => [trait.apiName, trait]));
+}
+
+function staticItems(payload) {
+  return Array.isArray(payload?.items) ? payload.items : [];
 }
 
 function teamPlannerChampions(payload) {
@@ -94,8 +99,11 @@ export class MetadataClient {
       this.json(`${communityBase}/${patchLine(version)}/plugins/rcp-be-lol-game-data/global/default/v1/tftchampions-teamplanner.json`).catch(() => null)
     ]);
     const traits = staticTraits(cdragon);
+    const itemDefinitions = staticItems(cdragon);
     const teamPlanner = teamPlannerChampions(teamPlannerPayload);
-    const result = { version, locale };
+    const dataDragonItems = Object.values(entries.find(([type]) => type === 'items')?.[1]?.data || {});
+    const itemTaxonomy = classifyItemCatalog(dataDragonItems, itemDefinitions);
+    const result = { version, locale, itemTaxonomyVersion: ITEM_TAXONOMY_VERSION };
     for (const [type, payload] of entries) {
       result[type] = Object.fromEntries(Object.values(payload.data || {}).map((entry) => {
         const trait = type === 'traits' ? traits.get(entry.id) : null;
@@ -105,6 +113,7 @@ export class MetadataClient {
           name: type === 'traits' ? localizedTraitName(entry.id, trait?.name || entry.name || entry.id, locale) : entry.name || entry.id,
           description: plainDescription(trait?.desc || entry.desc || entry.description),
           image: imageUrl(version, entry),
+          ...(type === 'items' ? itemTaxonomy[entry.id] : {}),
           ...(type === 'traits' ? { breakpoints: [...new Set((trait?.effects || []).map((effect) => Number(effect.minUnits)).filter((value) => value > 0))].sort((a, b) => a - b) } : {}),
           ...(planner && Number.isInteger(planner.teamPlannerCode) && planner.teamPlannerCode > 0 ? planner : {})
         }];

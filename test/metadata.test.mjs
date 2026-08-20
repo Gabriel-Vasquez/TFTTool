@@ -12,6 +12,8 @@ test('metadata resolves the matching patch and localized asset URLs', async () =
   const metadata = await new MetadataClient(fetchImpl).load('Linux Version 16.16.804.9184', 'es_ES');
   assert.equal(metadata.version, '16.16.1');
   assert.equal(metadata.items.TFT_Test.name, 'Prueba');
+  assert.equal(metadata.itemTaxonomyVersion, 1);
+  assert.equal(metadata.items.TFT_Test.type, 'unknown');
   assert.match(metadata.items.TFT_Test.image, /16\.16\.1\/img\/tft-item\/Test\.png$/);
   assert.equal(metadata.items.TFT_Test.description, 'Daño adicional');
 });

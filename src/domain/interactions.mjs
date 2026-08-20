@@ -1,4 +1,4 @@
-import { isAnalyticItemId } from './normalization.mjs';
+import { isAnalyticItem } from './item-taxonomy.mjs';
 
 export const INTERACTION_ANALYSIS_VERSION = 1;
 
@@ -40,8 +40,8 @@ function groupBy(values, selector) {
   return groups;
 }
 
-function uniqueItems(observation) {
-  return [...new Set((observation.units || []).flatMap((unit) => unit.items || []).filter(isAnalyticItemId))].sort();
+function uniqueItems(observation, itemMetadata) {
+  return [...new Set((observation.units || []).flatMap((unit) => unit.items || []).filter((id) => isAnalyticItem(id, itemMetadata)))].sort();
 }
 
 function leaveOneOut(summary, placement) {
@@ -56,6 +56,7 @@ function leaveOneOut(summary, placement) {
 }
 
 export function analyzeInteractions(observations, assignments, compositions, options = {}) {
+  const itemMetadata = options.itemMetadata || {};
   const minimumMatchupLobbies = options.minimumMatchupLobbies ?? 8;
   const matchupPriorLobbies = options.matchupPriorLobbies ?? 16;
   const minimumCounterLobbies = options.minimumCounterLobbies ?? 12;
@@ -75,7 +76,7 @@ export function analyzeInteractions(observations, assignments, compositions, opt
     if (!compositionGlobal.has(observation.compositionId)) compositionGlobal.set(observation.compositionId, rateStats());
     addPlacement(compositionRegion.get(regionKey), observation.placement);
     addPlacement(compositionGlobal.get(observation.compositionId), observation.placement);
-    for (const itemId of uniqueItems(observation)) {
+    for (const itemId of uniqueItems(observation, itemMetadata)) {
       const regionalItemKey = key(observation.region || 'GLOBAL', observation.compositionId, itemId);
       const globalItemKey = key(observation.compositionId, itemId);
       if (!itemRegionContext.has(regionalItemKey)) itemRegionContext.set(regionalItemKey, rateStats());
@@ -115,7 +116,7 @@ export function analyzeInteractions(observations, assignments, compositions, opt
       const byItem = new Map();
       for (const observation of lobby) {
         if (observation.compositionId === targetId) continue;
-        for (const itemId of uniqueItems(observation)) {
+        for (const itemId of uniqueItems(observation, itemMetadata)) {
           const regional = itemRegionContext.get(key(observation.region || 'GLOBAL', observation.compositionId, itemId));
           const global = itemGlobalContext.get(key(observation.compositionId, itemId));
           const baseline = regional?.placements.count >= minimumItemContextBoards ? leaveOneOut(regional, observation.placement) : global?.placements.count >= minimumItemContextBoards ? leaveOneOut(global, observation.placement) : null;

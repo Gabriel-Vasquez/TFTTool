@@ -20,7 +20,7 @@ const metadataClient = new MetadataClient(fetch, { cacheDirectory });
 const metadataEntries = await Promise.all(['es_ES', 'en_US'].map(async (locale) => [locale, await metadataClient.load(snapshot.observations[0]?.gameVersion || snapshot.observations[0]?.patch, locale)]));
 const portableMetadata = Object.fromEntries(metadataEntries);
 const traitBreakpoints = Object.fromEntries(Object.values(portableMetadata.es_ES.traits || {}).filter((trait) => trait.breakpoints?.length).map((trait) => [trait.id, trait.breakpoints]));
-const analyzed = analyzeCurrentSet(snapshot.observations, 0.5, { traitBreakpoints });
+const analyzed = analyzeCurrentSet(snapshot.observations, 0.5, { traitBreakpoints, itemMetadata: portableMetadata.es_ES.items || {} });
 snapshot.observations = analyzed.observations;
 snapshot.result = analyzed.result;
 if (!packedSeed) {
@@ -48,7 +48,7 @@ if (packedSeed) {
   const manifest = {
     format: 'tfttool-bundled-data', version: 1, snapshotId: snapshot.id, createdAt: snapshot.createdAt,
     observationCount: snapshot.observations.length, analysisVersion: snapshot.result.analysisVersion,
-    interactionAnalysisVersion: snapshot.result.interactions?.analysisVersion || null, regionalCounts,
+    interactionAnalysisVersion: snapshot.result.interactions?.analysisVersion || null, itemTaxonomyVersion: portableMetadata.es_ES.itemTaxonomyVersion || null, regionalCounts,
     packBytes: output.length, packSha256: createHash('sha256').update(output).digest('hex')
   };
   const manifestFile = file.replace(/\.tftpack$/i, '.manifest.json');

@@ -113,14 +113,39 @@ test('settings opens as a floating dialog with a verified application updater', 
   assert.match(launcher, /spawn\(installer, \['\/S'\]/);
 });
 
-test('one and two-star badges are muted while three-star badges remain prominent', async () => {
+test('one-star badges are muted while two-star badges are white and three-star badges remain prominent', async () => {
   const [app, css] = await Promise.all([
     readFile(join(root, 'public', 'app.js'), 'utf8'),
     readFile(join(root, 'public', 'app.css'), 'utf8')
   ]);
   assert.match(app, /star-level star-\$\{modal\}/);
-  assert.match(css, /\.star-level\.star-1,\.star-level\.star-2/);
+  assert.match(css, /\.star-level\.star-1\{/);
+  assert.match(css, /\.star-level\.star-2\{[^}]*color:#fff!important/);
   assert.match(css, /\.star-level\.star-3/);
+});
+
+test('item filters are shared by item, meta, champion, synergy, and interaction item surfaces', async () => {
+  const [app, css] = await Promise.all([
+    readFile(join(root, 'public', 'app.js'), 'utf8'),
+    readFile(join(root, 'public', 'app.css'), 'utf8')
+  ]);
+  assert.match(app, /ITEM_FILTER_TYPES/);
+  assert.match(app, /data-item-type/);
+  assert.match(app, /filteredItemEntries\(entry\.counterItems, 'itemId'\)/);
+  assert.match(app, /filteredItemEntries\(champion\.items\)/);
+  assert.match(css, /\.item-type-filter\{/);
+});
+
+test('portable export stages the same pack for the automatic release-data pipeline', async () => {
+  const [server, packageText, syncScript] = await Promise.all([
+    readFile(join(root, 'src', 'server.mjs'), 'utf8'),
+    readFile(join(root, 'package.json'), 'utf8'),
+    readFile(join(root, 'scripts', 'sync-release-data.mjs'), 'utf8')
+  ]);
+  assert.match(server, /publisher.*latest-export\.tftpack/s);
+  assert.equal(JSON.parse(packageText).scripts['prebuild:win'], 'node scripts/sync-release-data.mjs');
+  assert.match(syncScript, /ITEM_TAXONOMY_VERSION/);
+  assert.match(syncScript, /TARGET_OBSERVATIONS_PER_REGION/);
 });
 
 test('variant delta columns use symmetrical fixed geometry', async () => {

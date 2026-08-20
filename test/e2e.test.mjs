@@ -53,16 +53,16 @@ test('isolated service serves health, bootstrap, UI, and icon end to end', async
   const { url } = await startIsolatedServer(t);
   assert.deepEqual(await (await fetch(`${url}/api/health`)).json(), { ok: true, service: 'tfttool' });
   const bootstrap = await (await fetch(`${url}/api/bootstrap`)).json();
-  assert.equal(bootstrap.appVersion, '0.6.4');
+  assert.equal(bootstrap.appVersion, '0.6.5');
   assert.equal(bootstrap.settings.language, 'es');
   assert.equal(bootstrap.hasApiKey, false);
   assert.equal(bootstrap.refresh.targetPerRegion, 2_000);
   assert.equal(bootstrap.appUpdate.state, 'idle');
-  assert.equal((await (await fetch(`${url}/api/app-update`)).json()).currentVersion, '0.6.4');
+  assert.equal((await (await fetch(`${url}/api/app-update`)).json()).currentVersion, '0.6.5');
   const analysis = await (await fetch(`${url}/api/analysis`)).json();
   assert.equal(analysis.result.observations, 12_000);
   assert.equal(analysis.result.compositions.length, 25);
-  assert.equal(analysis.result.analysisVersion, 5);
+  assert.equal(analysis.result.analysisVersion, 6);
   assert.equal(analysis.result.interactions.analysisVersion, 1);
   assert.equal(analysis.result.interactions.archetypes.length, 25);
   const missFortune = analysis.result.compositions.find((composition) => composition.id === 'core:TFT17_MissFortune+TFT17_Ornn+TFT17_Viktor');
@@ -92,8 +92,8 @@ test('isolated settings flow persists language and rejects malformed keys', asyn
   assert.equal((await crossOrigin.json()).error, 'untrusted_origin');
 });
 
-test('isolated teammate flow exports and imports portable data without a Riot key or refresh', async (t) => {
-  const { url } = await startIsolatedServer(t);
+test('isolated teammate flow exports and stages portable data without a Riot key or refresh', async (t) => {
+  const { url, directory } = await startIsolatedServer(t);
   const beforeInteractions = (await (await fetch(`${url}/api/analysis`)).json()).result.interactions;
   await fetch(`${url}/api/settings`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ language: 'en' }) });
   const exported = await fetch(`${url}/api/data-pack/export`);
@@ -101,6 +101,8 @@ test('isolated teammate flow exports and imports portable data without a Riot ke
   assert.match(exported.headers.get('content-type'), /application\/vnd\.tfttool\.pack/);
   const pack = await exported.arrayBuffer();
   assert.ok(pack.byteLength > 1_000_000);
+  const staged = await readFile(join(directory, 'publisher', 'latest-export.tftpack'));
+  assert.deepEqual(staged, Buffer.from(pack));
   const imported = await fetch(`${url}/api/data-pack/import`, { method: 'POST', headers: { 'content-type': 'application/vnd.tfttool.pack' }, body: pack });
   assert.equal(imported.status, 200);
   const importResult = await imported.json();

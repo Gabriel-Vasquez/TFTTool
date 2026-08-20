@@ -1,6 +1,6 @@
 {
   "name": "tfttool",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "description": "Local TFT elite meta analytics powered by official Riot data.",
   "author": "Gabriel Vasquez",
   "private": true,
@@ -10,6 +10,8 @@
     "start": "node src/server.mjs",
     "desktop": "electron electron/main.cjs",
     "test": "node --test",
+    "release:data": "node scripts/sync-release-data.mjs",
+    "prebuild:win": "node scripts/sync-release-data.mjs",
     "build:win": "electron-builder --win nsis"
   },
   "devDependencies": {

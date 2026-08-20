@@ -1,6 +1,6 @@
 import { ANALYSIS_VERSION, activeTraits, clusterCompositions, lineupIdentity } from './composition.mjs';
 import { analyzeInteractions } from './interactions.mjs';
-import { isAnalyticItemId } from './normalization.mjs';
+import { isAnalyticItem } from './item-taxonomy.mjs';
 import { scoreByPrevalenceAndPlacement } from './score.mjs';
 
 const increment = (map, key, value = 1) => map.set(key, (map.get(key) || 0) + value);
@@ -44,18 +44,19 @@ function aggregateEntities(observations, extractor, prevalenceDenominator) {
   }));
 }
 
-export function championDetails(observations) {
+export function championDetails(observations, itemMetadata = {}) {
+  const analyticItem = (id) => isAnalyticItem(id, itemMetadata);
   const champions = new Map();
   for (const observation of observations) {
     const bestUnits = new Map();
     for (const unit of observation.units) {
       const current = bestUnits.get(unit.id);
-      const itemCount = unit.items.filter(isAnalyticItemId).length;
-      const currentItemCount = current?.items.filter(isAnalyticItemId).length || 0;
+      const itemCount = unit.items.filter(analyticItem).length;
+      const currentItemCount = current?.items.filter(analyticItem).length || 0;
       if (!current || itemCount > currentItemCount || (itemCount === currentItemCount && unit.tier > current.tier)) bestUnits.set(unit.id, unit);
     }
     for (const unit of bestUnits.values()) {
-      const analyticItems = unit.items.filter(isAnalyticItemId);
+      const analyticItems = unit.items.filter(analyticItem);
       if (!champions.has(unit.id)) champions.set(unit.id, { id: unit.id, name: unit.name, samples: 0, itemTotal: 0, stars: new Map(), items: new Map(), itemSlots: new Map(), loadouts: new Map(), combinations: new Map(), observations: [] });
       const champion = champions.get(unit.id);
       champion.samples += 1;
@@ -126,13 +127,13 @@ export function deriveTraitBreakpoints(observations) {
   return Object.fromEntries(Object.entries(result).map(([id, thresholds]) => [id, [...new Set(thresholds)].sort((a, b) => a - b)]));
 }
 
-export function aggregate(observations, prevalenceWeight = 0.5, { traitBreakpoints = {} } = {}) {
+export function aggregate(observations, prevalenceWeight = 0.5, { traitBreakpoints = {}, itemMetadata = {} } = {}) {
   if (!Object.keys(traitBreakpoints).length) traitBreakpoints = deriveTraitBreakpoints(observations);
   const clustered = clusterCompositions(observations, { traitBreakpoints });
   const compositions = clustered.clusters.map((cluster) => {
     const samples = cluster.observations;
     const metrics = entityMetrics(samples);
-    const champions = championDetails(samples);
+    const champions = championDetails(samples, itemMetadata);
     const variantGroups = new Map();
     for (const observation of samples) {
       const id = lineupIdentity(observation);
@@ -144,7 +145,7 @@ export function aggregate(observations, prevalenceWeight = 0.5, { traitBreakpoin
       id,
       prevalence: variantSamples.length / samples.length,
       ...entityMetrics(variantSamples),
-      champions: championDetails(variantSamples)
+      champions: championDetails(variantSamples, itemMetadata)
     })).sort((a, b) => b.sampleSize - a.sampleSize || a.id.localeCompare(b.id));
     return {
       id: cluster.id,
@@ -169,8 +170,8 @@ export function aggregate(observations, prevalenceWeight = 0.5, { traitBreakpoin
     assignments: clustered.assignments,
     traitBreakpoints,
     compositions: scoredCompositions,
-    interactions: analyzeInteractions(observations, clustered.assignments, scoredCompositions),
-    items: scoreEntities(aggregateEntities(observations, (item) => item.units.flatMap((unit) => unit.items.filter(isAnalyticItemId).map((id) => ({ id, context: unit.id }))), observations.length)),
+    interactions: analyzeInteractions(observations, clustered.assignments, scoredCompositions, { itemMetadata }),
+    items: scoreEntities(aggregateEntities(observations, (item) => item.units.flatMap((unit) => unit.items.filter((id) => isAnalyticItem(id, itemMetadata)).map((id) => ({ id, context: unit.id }))), observations.length)),
     champions: scoreEntities(aggregateEntities(observations, (item) => item.units.map((unit) => ({ id: unit.id, name: unit.name, context: compositionContext(item) })), observations.length)),
     synergies: scoreEntities(aggregateEntities(observations, (item) => activeTraits(item, traitBreakpoints).map((trait) => ({ id: `${trait.id}:${trait.breakpoint}`, name: `${trait.name} ${trait.breakpoint}`, context: compositionContext(item) })), observations.length))
   };
