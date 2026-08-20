@@ -55,6 +55,16 @@ while (Date.now() < deadline) {
 if (!state?.title?.startsWith('TFTTool') || state.cards !== 25 || !/Meta actual|Current meta/.test(state.text)) throw new Error(`Unexpected standalone window state: ${JSON.stringify(state)}`);
 if (state.width > state.viewport) throw new Error(`Standalone window has horizontal overflow: ${state.width} > ${state.viewport}`);
 
+await command('Runtime.evaluate', { expression: `document.querySelector('[data-composition-id="core:TFT17_MissFortune+TFT17_Ornn+TFT17_Viktor"]')?.click()` });
+let visibleVariants = 0;
+while (Date.now() < deadline) {
+  const evaluated = await command('Runtime.evaluate', { expression: `document.querySelectorAll('.variant-list .variant').length`, returnByValue: true });
+  visibleVariants = evaluated.result.value;
+  if (visibleVariants === 12) break;
+  await new Promise((resolve) => setTimeout(resolve, 100));
+}
+if (visibleVariants !== 12) throw new Error(`Expected 12 visible Miss Fortune variants, found ${visibleVariants}.`);
+
 await command('Runtime.evaluate', { expression: `document.querySelector('[data-tab="settings"]')?.click()` });
 let controls;
 while (Date.now() < deadline) {
@@ -74,5 +84,5 @@ if (screenshotPath) {
 }
 
 socket.close();
-console.log(JSON.stringify({ ok: true, targetType: target.type, url: target.url, title: state.title, cards: state.cards, controls, horizontalOverflow: false }));
+console.log(JSON.stringify({ ok: true, targetType: target.type, url: target.url, title: state.title, cards: state.cards, visibleVariants, controls, horizontalOverflow: false }));
 process.exit(0);

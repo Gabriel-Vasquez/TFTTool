@@ -152,7 +152,7 @@ export function aggregate(observations, prevalenceWeight = 0.5, { traitBreakpoin
       champions,
       flagship: allVariants[0],
       variantCount: allVariants.length,
-      variants: allVariants.slice(0, 8)
+      variants: allVariants.slice(0, 12)
     };
   });
   const compositionContext = (observation) => clustered.assignments[observation.id];

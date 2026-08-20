@@ -35,9 +35,12 @@ test('isolated service serves health, bootstrap, UI, and icon end to end', async
   const analysis = await (await fetch(`${url}/api/analysis`)).json();
   assert.equal(analysis.result.observations, 12_000);
   assert.equal(analysis.result.compositions.length, 25);
-  assert.equal(analysis.result.analysisVersion, 3);
+  assert.equal(analysis.result.analysisVersion, 4);
   assert.equal(analysis.result.interactions.analysisVersion, 1);
   assert.equal(analysis.result.interactions.archetypes.length, 25);
+  const missFortune = analysis.result.compositions.find((composition) => composition.id === 'core:TFT17_MissFortune+TFT17_Ornn+TFT17_Viktor');
+  assert.equal(missFortune.variants.length, 12);
+  assert.ok(missFortune.variants.some((variant) => ['TFT17_MissFortune', 'TFT17_Lulu', 'TFT17_Nami'].every((id) => variant.champions.some((champion) => champion.id === id))));
   assert.match(await (await fetch(url)).text(), /TFTTool/);
   assert.equal((await fetch(`${url}/icon.png`)).status, 200);
 });
