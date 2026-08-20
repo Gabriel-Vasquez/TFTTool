@@ -12,9 +12,9 @@ All development and testing must run in the repository-owned isolated QA sandbox
 
 The first owner-facing in-place update must include the complete, freshly validated six-region real-data snapshot collected during QA so the product is ready for immediate use without another same-day refresh. Never discard that retrieved dataset. Import it only when newer than the owner's latest local snapshot, while preserving every existing historical snapshot, setting, and encrypted Riot key.
 
-- Phase: TFTTool 0.6.7 release candidate is complete; the canonical 24,000-observation pack, full suite, installer build, and isolated packaged visual QA pass. Publication to public `main` and the stable update channel is the remaining release action.
+- Phase: TFTTool 0.6.7 is published to public `main` and the controlled stable update channel with the canonical 24,000-observation pack. Full-suite, installer, isolated packaged visual, public-manifest, and verified-download QA pass.
 - Branch: `main`.
-- Published release: TFTTool `0.6.6` on public `main`, with installer asset tag `v0.6.6` and `updates/stable.json` as the controlled stable channel.
+- Published release: TFTTool `0.6.7` on public `main`, with installer asset tag `v0.6.7` and `updates/stable.json` as the controlled stable channel.
 - GitHub: public `Gabriel-Vasquez/TFTTool`.
 - Implemented and installed: official multi-region Riot ingestion, protected local key storage and invalid-key replacement, full baseline plus incremental diff refresh, deterministic current-set archetypes, real trait breakpoints, exact prevalence/raw-placement weighting, TFTactics-style champion/item presentation, flagship-relative variant diffs, Team Planner export codes, shared-lobby matchup and opponent-conditioned Counter Item analytics, evidence drill-downs, snapshot history/trends, portable `.tftpack` transfer, complete EN/ES UX, bounded rendering/search, secured standalone Electron window, local shutdown control, compressed bundled snapshot import, and NSIS in-place updating.
 - Owner-data baseline: TFTTool 0.6.1 is installed at `C:\Program Files\TFTTool`. The data directory, encrypted key availability, Spanish preference, snapshot identity, history, and all 12,000 observations remain preserved after the in-place migration.
@@ -39,7 +39,7 @@ The first owner-facing in-place update must include the complete, freshly valida
 
 ## Next actions
 
-1. Publish the validated 0.6.7 installer and controlled stable manifest; existing installations then apply it through Settings > Update TFTTool.
+1. Existing 0.6.2+ installations apply 0.6.7 through Settings > Update TFTTool; future owner exports remain staged automatically for the next validated release build.
 2. Continue production-BETA use and report any changes required before version 1.0; avoid speculative feature work until that feedback arrives.
 3. Future explicit data refreshes reuse the rolling five-day/current-patch sample and request only post-baseline match IDs plus unseen match details.
 
@@ -54,7 +54,7 @@ The first owner-facing in-place update must include the complete, freshly valida
 
 ## Validation
 
-- All 98 automated tests pass on 0.6.7, including the 24,000-row canonical-upgrade reproduction, deterministic elite-tier priority/fallback collection, portable-data preservation and active-snapshot counts, item performance evidence, patch-agnostic item filtering, removed progression, visible-champion search, and UI contracts. Isolated packaged visual QA also passes; public update-channel validation remains pending publication.
+- All 98 automated tests pass on 0.6.7, including the 24,000-row canonical-upgrade reproduction, deterministic elite-tier priority/fallback collection, portable-data preservation and active-snapshot counts, item performance evidence, patch-agnostic item filtering, removed progression, visible-champion search, and UI contracts. Isolated packaged visual QA and public update-channel validation also pass.
 - The canonical 0.6.7 snapshot `9b479584-d965-49c7-84e1-2dbf70a37b7f` contains exactly 24,000 unique patch 16.16 / Set 17 observations: 4,000 each for EUW, NA, KR, BR, LAN, and LAS. Global rank provenance is 6,406 Challenger, 10,127 Grandmaster, and 7,467 Master. EUW, NA, and KR need no Master fallback; BR admits 1,875 Master rows, LAN 2,782, and LAS 2,810 only after exhausting primary-ladder evidence.
 - The 0.6.7 bundled `.tftpack` is 7,976,531 bytes with SHA-256 `7CB63973EC91094F6512E8043448E88CA2E618ABF93D6A28E6DA6CCC7FCC11C3`, analysis version 9, interaction analysis version 1, taxonomy version 3, two-locale portable metadata, and no credential material.
 - All 74 domain, clustering, scoring, interaction, Team Planner, metadata, localization, history, security, Riot-key, persistence, incremental-refresh, compressed-seed reconciliation, portable-data, updater, standalone-window, UI-contract, and isolated service end-to-end tests pass on 0.6.2.
@@ -81,3 +81,4 @@ The first owner-facing in-place update must include the complete, freshly valida
 - Public-channel QA verifies that a 0.6.3 client sees 0.6.4 as available, a 0.6.4 client reports up to date, and the exact updater code path downloads all 89,468,238 bytes from the public release and reproduces SHA-256 `5F3B75AC0B2BCD0D615A9AF99C3CC8369CF72E1A4ECC023538B2AA4E6861325F`.
 - Public-channel QA verifies that a 0.6.4 client sees 0.6.5 as available, a 0.6.5 client reports up to date, and the exact updater code path downloads all 89,475,633 bytes from the public release and reproduces SHA-256 `CAFCEBC062897B6C73E9042F902128B9F7D9D6C31FC9E9AC6C99FE9AA2B98D1A`.
 - Public-channel QA verifies that a 0.6.5 client sees 0.6.6 as available, a 0.6.6 client reports up to date, and the exact updater code path downloads all 89,432,216 bytes from the public release and reproduces SHA-256 `58170885B255EFFBB498B85B638D7B4F7B64CA8921B5C154D2A82009119209D2`.
+- Public-channel QA verifies that a 0.6.6 client sees 0.6.7 as available, a 0.6.7 client reports up to date, and the exact updater code path downloads all 93,642,410 bytes from the public release and reproduces SHA-256 `8B91A2A9327051CCE147F72D32CA6F3C9294DA7D0B548ECF6DB58C3B0C72E175`.
