@@ -12,7 +12,7 @@ All development and testing must run in the repository-owned isolated QA sandbox
 
 The first owner-facing in-place update must include the complete, freshly validated six-region real-data snapshot collected during QA so the product is ready for immediate use without another same-day refresh. Never discard that retrieved dataset. Import it only when newer than the owner's latest local snapshot, while preserving every existing historical snapshot, setting, and encrypted Riot key.
 
-- Phase: TFTTool 0.6.1 twelve-variant visibility patch is complete, installed in place, and validated against the preserved owner data.
+- Phase: TFTTool 0.6.1 is owner-accepted, finished, and in production as a BETA release.
 - Branch: `main`.
 - Published release: TFTTool `0.6.1` on `main`.
 - GitHub: private `Gabriel-Vasquez/TFTTool`.
@@ -28,12 +28,18 @@ The first owner-facing in-place update must include the complete, freshly valida
 
 ## Next actions
 
-1. Owner launches the installed TFTTool 0.6.1 from its desktop or Start menu shortcut for normal use.
-2. Future explicit refreshes reuse the rolling five-day/current-patch sample and request only post-baseline match IDs plus unseen match details.
+1. No active implementation work is required. The owner will use the production BETA and report any changes required before version 1.0.
+2. Until that feedback arrives, preserve version 0.6.1 behavior, data compatibility, update rules, and the installed owner state without speculative feature work.
+3. Future explicit data refreshes reuse the rolling five-day/current-patch sample and request only post-baseline match IDs plus unseen match details.
 
 ## Blockers
 
 - No current blocker. A future Riot-key expiration is handled by the in-app replacement flow.
+
+## Owner acceptance
+
+- On 2026-08-20, the owner accepted TFTTool 0.6.1 as finished and placed it in production with BETA status.
+- Version 1.0 scope is intentionally deferred until the owner provides findings from production-BETA use.
 
 ## Validation
 
