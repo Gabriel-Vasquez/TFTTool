@@ -12,9 +12,9 @@ All development and testing must run in the repository-owned isolated QA sandbox
 
 The first owner-facing in-place update must include the complete, freshly validated six-region real-data snapshot collected during QA so the product is ready for immediate use without another same-day refresh. Never discard that retrieved dataset. Import it only when newer than the owner's latest local snapshot, while preserving every existing historical snapshot, setting, and encrypted Riot key.
 
-- Phase: TFTTool 0.6.4 Team Planner correction is package-validated; controlled-channel publication is in progress.
+- Phase: TFTTool 0.6.4 Team Planner correction is complete, package-validated, and published to the controlled stable update channel.
 - Branch: `main`.
-- Published release: TFTTool `0.6.3` on public `main`, with installer asset tag `v0.6.3` and `updates/stable.json` as the controlled stable channel.
+- Published release: TFTTool `0.6.4` on public `main`, with installer asset tag `v0.6.4` and `updates/stable.json` as the controlled stable channel.
 - GitHub: public `Gabriel-Vasquez/TFTTool`.
 - Implemented and installed: official multi-region Riot ingestion, protected local key storage and invalid-key replacement, full baseline plus incremental diff refresh, deterministic current-set archetypes, real trait breakpoints, exact prevalence/raw-placement weighting, TFTactics-style champion/item presentation, flagship-relative variant diffs, Team Planner export codes, shared-lobby matchup and opponent-conditioned Counter Item analytics, evidence drill-downs, snapshot history/trends, portable `.tftpack` transfer, complete EN/ES UX, bounded rendering/search, secured standalone Electron window, local shutdown control, compressed bundled snapshot import, and NSIS in-place updating.
 - Owner-data baseline: TFTTool 0.6.1 is installed at `C:\Program Files\TFTTool`. The data directory, encrypted key availability, Spanish preference, snapshot identity, history, and all 12,000 observations remain preserved after the in-place migration.
@@ -34,7 +34,7 @@ The first owner-facing in-place update must include the complete, freshly valida
 
 ## Next actions
 
-1. Complete 0.6.4 package QA, publish the installer release, and atomically advance the stable updater from 0.6.3.
+1. Existing 0.6.3 installations apply 0.6.4 through Settings > Update TFTTool; new installations may use the v0.6.4 release installer.
 2. Continue production-BETA use and report any changes required before version 1.0; avoid speculative feature work until that feedback arrives.
 3. Future explicit data refreshes reuse the rolling five-day/current-patch sample and request only post-baseline match IDs plus unseen match details.
 
