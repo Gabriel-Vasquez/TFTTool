@@ -12,7 +12,9 @@ The three representative champions are the units with the strongest combination 
 
 Champion builds use a separate slot-frequency pipeline. Individual-item prevalence still counts an item at most once per champion board, while representative slots, two-item combinations, and full loadouts retain real multiplicity. Consequently, a supported build can display two or three copies of the same item without inflating the global Items ranking. The composition-scoped champion detail can re-rank individual items and representative slots between prevalence and observed placement performance. The default remains 100% prevalence; performance is the average placement of that archetype's boards where the champion carried that item or copy-specific slot, normalized only against the other eligible items shown for the same champion and archetype.
 
-The most frequent exact lineup is the archetype's flagship. The first expanded row shows that reference once; every other displayed variant is expressed only as champions removed from and added to the flagship, avoiding repeated full-team lists.
+The most frequent exact lineup is the archetype's flagship. The first expanded row shows that reference once; every other displayed variant is expressed only as champions removed from and added to the flagship, avoiding repeated full-team lists. Each exact lineup independently ranks its own three item-invested CORE champions from only that variant's observations and displays their three representative item slots; it never inherits the archetype-level CORE by identity.
+
+Emblem identification is metadata-first and patch agnostic. An exact variant receives `[Emblema]` only when every one of its real observations contains an emblem on at least one champion. The archetype receives the same marker only when its most-played flagship variant satisfies that strict condition. Optional-emblem and emblem-free variants remain unmarked.
 
 ## Set transitions
 

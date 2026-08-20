@@ -75,10 +75,37 @@ test('composition champion detail reweights item prevalence against observed per
   assert.match(app, /scored\(filteredItemEntries\(champion\.itemSlots\), state\.championItemWeight\)\.slice\(0, 3\)/);
   assert.match(app, /scored\(filteredItemEntries\(champion\.items\), state\.championItemWeight\)/);
   assert.match(app, /data-champion-item-weight/);
+  assert.match(app, /function updateChampionItemRanking/);
+  assert.match(app, /data-champion-ranked-slot-list/);
+  assert.match(app, /data-champion-ranked-item-list/);
+  assert.doesNotMatch(app, /state\.championItemWeight = 100 - Number\(event\.target\.value\); renderCompositionChampionDetail/);
   assert.match(app, /item\.averagePlacement\.toFixed\(2\)/);
   assert.match(aggregate, /itemEvidence: new Map\(\)/);
   assert.match(aggregate, /evidenceMetrics\(champion\.itemEvidence\.get\(id\)\)/);
   assert.doesNotMatch(aggregate, /itemSlots:.*slice\(0, 3\)/);
+});
+
+test('exact variants render their own three-champion itemized CORE while remaining flagship-relative diffs', async () => {
+  const [app, aggregate] = await Promise.all([
+    readFile(join(root, 'public', 'app.js'), 'utf8'),
+    readFile(join(root, 'src', 'domain', 'aggregate.mjs'), 'utf8')
+  ]);
+  assert.match(aggregate, /coreChampions: variantChampions\.slice\(0, 3\)/);
+  assert.match(app, /function variantCore/);
+  assert.match(app, /variant\.coreChampions \|\| variant\.champions\?\.slice\(0, 3\)/);
+  assert.match(app, /variant-core-panel/);
+  assert.match(app, /itemSlots: true/);
+  assert.match(app, /variantDiff\(flagship, variant\)/);
+  assert.match(app, /function emblemBadge/);
+  assert.match(app, /emblemBadge\(item\)/);
+  assert.match(app, /emblemBadge\(variant\)/);
+});
+
+test('all modal dialogs close from a true backdrop click without treating content clicks as outside', async () => {
+  const app = await readFile(join(root, 'public', 'app.js'), 'utf8');
+  assert.match(app, /function closeDialogFromBackdrop/);
+  assert.match(app, /event\.target === dialog && outside/);
+  assert.match(app, /\['#key-dialog', '#settings-dialog', '#detail-dialog'\]/);
 });
 
 test('language switching requests official en-US or Spain Spanish metadata immediately', async () => {
@@ -185,6 +212,8 @@ test('meta layout selector persists Standard or Compact while Compact keeps ever
   assert.match(css, /\.composition-list\.layout-compact/);
   assert.match(css, /\.compact-core-group\{/);
   assert.match(css, /\.composition-list\.layout-compact\{grid-template-columns:1fr/);
+  assert.match(css, /\.comp-card\.layout-compact \.comp-summary\{grid-template-columns:minmax\(610px,1fr\)/);
+  assert.match(css, /min-height:88px/);
   assert.match(store, /layout: 'standard'/);
 });
 
@@ -294,6 +323,7 @@ test('champion cost borders, brilliant CORE treatment, and item components are v
   assert.match(css, /\.champion-tile\.cost-3/);
   assert.match(css, /\.champion-tile\.cost-4 \.champion-portrait,\.champion-tile\.cost-5/);
   assert.match(css, /\.highlighted-core \.champion-portrait/);
+  assert.match(css, /border-width:3px;outline:1px solid currentColor/);
   assert.match(app, /function itemComponentsView/);
   assert.match(app, /type === 'items' \? itemComponentsView/);
   assert.match(metadata, /components: \[\.\.\.\(itemDefinition\?\.composition \|\| \[\]\)\]/);

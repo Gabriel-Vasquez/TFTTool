@@ -36,9 +36,11 @@ The owner can select **Settings → Export data** and distribute the generated `
 
 See [docs/ANALYTICS.md](docs/ANALYTICS.md) for composition dominance, prevalence, score, and snapshot-sufficiency methods.
 
-The bundled 0.6.7 baseline targets 24,000 ranked observations: 4,000 each from EUW, NA, KR, BR, LAN, and LAS. Challenger and Grandmaster evidence is collected first; Master is used only for any remaining regional deficit, and tier/LP provenance is retained for audit.
+The bundled 0.6.8 baseline contains 24,000 ranked observations: 4,000 each from EUW, NA, KR, BR, LAN, and LAS. Challenger and Grandmaster evidence is collected first; Master is used only for any remaining regional deficit, and tier/LP provenance is retained for audit.
 
-Meta and Favorites share an All-first synergy dropdown, champion-name search covers displayed archetypes and variants, and Standard/Compact layouts preserve the same card evidence. Composition-scoped champion details default item recommendations to prevalence and provide a local prevalence/performance slider backed by that champion-item pair's observed placement within the archetype. Inferred level-by-level boards are intentionally absent because final-board match data cannot support them truthfully.
+Meta and Favorites share an All-first synergy dropdown, champion-name search covers displayed archetypes and variants, and Standard/Compact layouts preserve the same card evidence while Compact renders each collapsed composition as a materially shorter horizontal row. Every exact variant derives and displays its own three itemized CORE champions while remaining expressed as a flagship-relative add/remove diff. `[Emblema]` appears only when real observations consistently require an emblem for that exact variant; the archetype inherits it only from its most-played flagship.
+
+Composition-scoped champion details default item recommendations to prevalence and provide a wide, continuously draggable prevalence/performance slider backed by that champion-item pair's observed placement within the archetype. Dialogs close from either their X control or a click on the surrounding backdrop. Inferred level-by-level boards are intentionally absent because final-board match data cannot support them truthfully.
 
 ## Maintainer validation
 

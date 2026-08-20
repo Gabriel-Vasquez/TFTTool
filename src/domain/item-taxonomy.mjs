@@ -61,3 +61,10 @@ export function isAnalyticItem(id, itemMetadata = {}) {
   if (value?.analyticsClass) return value.analyticsClass !== 'excluded';
   return !/(?:_Tier\d+_|EmptyBag|Placeholder|Debug|Dummy)/i.test(String(id));
 }
+
+export function isEmblemItem(id, itemMetadata = {}) {
+  if (!id) return false;
+  const value = itemMetadata[id];
+  if (value?.type) return value.type === 'emblem';
+  return /(?:EmblemItem|\bEmblem\b|Item_Icons[\\/]Traits[\\/]Spatula)/i.test(String(id));
+}

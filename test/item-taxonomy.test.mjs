@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildItemTaxonomy, classifyItemCatalog, isAnalyticItem, ITEM_TAXONOMY_VERSION } from '../src/domain/item-taxonomy.mjs';
+import { buildItemTaxonomy, classifyItemCatalog, isAnalyticItem, isEmblemItem, ITEM_TAXONOMY_VERSION } from '../src/domain/item-taxonomy.mjs';
 
 const definitions = [
   { apiName: 'BaseSword', name: 'Sword', composition: [] },
@@ -42,4 +42,11 @@ test('analytics eligibility uses metadata and has a generic legacy fallback', ()
   assert.equal(isAnalyticItem('TFT99_Mechanic_Tier2_Blade', metadata), false);
   assert.equal(isAnalyticItem('TFT_Item_EmptyBag', metadata), false);
   assert.equal(isAnalyticItem('TFT88_Anything_Tier3_Upgrade'), false);
+});
+
+test('emblem detection is metadata-first and patch agnostic', () => {
+  const metadata = Object.fromEntries([...buildItemTaxonomy(definitions)].map(([id, value]) => [id, value]));
+  assert.equal(isEmblemItem('FutureSet_EmblemItem', metadata), true);
+  assert.equal(isEmblemItem('RegularBlade', metadata), false);
+  assert.equal(isEmblemItem('TFT88_NewTraitEmblemItem'), true);
 });

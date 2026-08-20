@@ -1,6 +1,6 @@
 import { ANALYSIS_VERSION, activeTraits, clusterCompositions, lineupIdentity } from './composition.mjs';
 import { analyzeInteractions } from './interactions.mjs';
-import { isAnalyticItem } from './item-taxonomy.mjs';
+import { isAnalyticItem, isEmblemItem } from './item-taxonomy.mjs';
 import { scoreByPrevalenceAndPlacement } from './score.mjs';
 
 const increment = (map, key, value = 1) => map.set(key, (map.get(key) || 0) + value);
@@ -158,12 +158,19 @@ export function aggregate(observations, prevalenceWeight = 0.5, { traitBreakpoin
       if (!variantGroups.has(id)) variantGroups.set(id, []);
       variantGroups.get(id).push(observation);
     }
-    const allVariants = [...variantGroups.entries()].map(([id, variantSamples]) => ({
-      id,
-      prevalence: variantSamples.length / samples.length,
-      ...entityMetrics(variantSamples),
-      champions: championDetails(variantSamples, itemMetadata)
-    })).sort((a, b) => b.sampleSize - a.sampleSize || a.id.localeCompare(b.id));
+    const allVariants = [...variantGroups.entries()].map(([id, variantSamples]) => {
+      const variantChampions = championDetails(variantSamples, itemMetadata);
+      const emblemObservations = variantSamples.filter((observation) => observation.units.some((unit) => unit.items.some((item) => isEmblemItem(item, itemMetadata)))).length;
+      return {
+        id,
+        prevalence: variantSamples.length / samples.length,
+        ...entityMetrics(variantSamples),
+        emblemRate: emblemObservations / variantSamples.length,
+        requiresEmblem: emblemObservations === variantSamples.length,
+        coreChampions: variantChampions.slice(0, 3),
+        champions: variantChampions
+      };
+    }).sort((a, b) => b.sampleSize - a.sampleSize || a.id.localeCompare(b.id));
     const composition = {
       id: cluster.id,
       name: cluster.id,
@@ -173,6 +180,7 @@ export function aggregate(observations, prevalenceWeight = 0.5, { traitBreakpoin
       coreChampions: champions.slice(0, 3),
       champions,
       flagship: allVariants[0],
+      requiresEmblem: allVariants[0]?.requiresEmblem || false,
       variantCount: allVariants.length,
       variants: allVariants.slice(0, 12)
     };

@@ -105,6 +105,37 @@ test('flagship contains the complete most frequent board while CORE remains exac
   assert.equal(result.compositions[0].coreChampions.length, 3);
 });
 
+test('every exact variant derives its own deterministic three-champion itemized CORE', () => {
+  const samples = archetypeSamples('Alpha', 30, 'AlphaItem');
+  const result = aggregate(samples, 0.5, { traitBreakpoints: { TraitA: [2, 4] } });
+  const variants = result.compositions.flatMap((composition) => composition.variants);
+  assert.ok(variants.length >= 3);
+  for (const variant of variants) {
+    assert.equal(variant.coreChampions.length, 3);
+    assert.deepEqual(variant.coreChampions, variant.champions.slice(0, 3));
+    assert.ok(variant.coreChampions.every((champion) => champion.itemSlots.length > 0));
+  }
+  const reversed = aggregate([...samples].reverse(), 0.5, { traitBreakpoints: { TraitA: [2, 4] } });
+  assert.deepEqual(reversed.compositions.flatMap((composition) => composition.variants.map((variant) => [variant.id, variant.coreChampions.map((champion) => champion.id)])), variants.map((variant) => [variant.id, variant.coreChampions.map((champion) => champion.id)]));
+});
+
+test('emblem labels require every real observation of the exact variant and flow only from the flagship to the archetype', () => {
+  const itemMetadata = { FutureTraitEmblemItem: { type: 'emblem', analyticsClass: 'contextual' }, RegularItem: { type: 'regular', analyticsClass: 'comparable' } };
+  const allEmblem = [
+    observation('emblem-1', 1, [unit('A', ['FutureTraitEmblemItem']), unit('B', ['RegularItem']), unit('C', ['RegularItem'])]),
+    observation('emblem-2', 2, [unit('A', ['FutureTraitEmblemItem']), unit('B', ['RegularItem']), unit('C', ['RegularItem'])])
+  ];
+  const required = aggregate(allEmblem, 0.5, { itemMetadata });
+  assert.equal(required.compositions[0].flagship.requiresEmblem, true);
+  assert.equal(required.compositions[0].flagship.emblemRate, 1);
+  assert.equal(required.compositions[0].requiresEmblem, true);
+
+  const optional = aggregate([...allEmblem, observation('without-emblem', 3, [unit('A', ['RegularItem']), unit('B', ['RegularItem']), unit('C', ['RegularItem'])])], 0.5, { itemMetadata });
+  assert.equal(optional.compositions[0].flagship.requiresEmblem, false);
+  assert.equal(optional.compositions[0].flagship.emblemRate, 2 / 3);
+  assert.equal(optional.compositions[0].requiresEmblem, false);
+});
+
 test('empty final boards remain counted in the archetype but are not presented as importable variants', () => {
   const observations = Array.from({ length: 16 }, (_, index) => observation(
     `empty-variant-${index}`,
