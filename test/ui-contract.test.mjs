@@ -107,6 +107,9 @@ test('settings opens as a floating dialog with a verified application updater', 
   assert.match(app, /data-app-update/);
   assert.match(app, /api\('\/api\/app-update'.*method: 'POST'/);
   assert.match(css, /\.settings-dialog\{/);
+  assert.match(css, /\.app-shell \{ display:block;min-height:100vh;padding-left:230px/);
+  assert.match(css, /\.sidebar \{ position:fixed;z-index:30;left:0;top:0;bottom:0;[^}]*height:100vh;overflow:hidden/);
+  assert.match(css, /\.sidebar-bottom \{ flex:0 0 auto;margin-top:auto/);
   assert.match(launcher, /spawn\(installer, \['\/S'\]/);
 });
 

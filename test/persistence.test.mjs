@@ -134,6 +134,26 @@ test('compressed bundled seed repairs a partial local copy of the same canonical
   assert.equal(store.state.bundledSnapshotHashes[snapshot.id], packSha256);
 });
 
+test('canonical bundle remains current over a newer 11,786-observation partial snapshot without deleting history or settings', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'tfttool-store-canonical-current-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = new LocalStore(directory);
+  await store.load();
+  await store.updateSettings({ language: 'en' });
+  const regions = ['EUW', 'NA', 'KR', 'BR', 'LAN', 'LAS'];
+  const canonical = publishableSnapshot('canonical-12000', '2026-08-20T00:00:00.000Z');
+  canonical.observations = regions.flatMap((region) => Array.from({ length: 2_000 }, (_, index) => ({ id: `${region}-${index}`, region })));
+  canonical.result.observations = 12_000;
+  const partial = { ...publishableSnapshot('partial-11786', '2026-08-21T00:00:00.000Z'), observations: canonical.observations.slice(0, 11_786), result: { observations: 11_786 } };
+  await store.addSnapshot(partial);
+
+  assert.deepEqual(await store.reconcileBundledSnapshot(canonical, 'canonical-hash'), { imported: true, reason: 'canonical_baseline' });
+  assert.deepEqual(store.state.snapshots.map((snapshot) => snapshot.id), ['canonical-12000', 'partial-11786']);
+  assert.equal(store.latestSnapshot().id, 'canonical-12000');
+  assert.equal(store.latestSnapshot().observations.length, 12_000);
+  assert.equal(store.state.settings.language, 'en');
+});
+
 test('portable data import is atomic and merges new snapshots without deleting history or preferences', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'tfttool-store-portable-'));
   t.after(() => rm(directory, { recursive: true, force: true }));

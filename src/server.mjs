@@ -160,10 +160,10 @@ export async function createTftServer({ onShutdown = () => {}, onInstallUpdate =
       return { ...snapshot, observations };
     });
     for (const snapshot of store.state.snapshots) snapshot.result = aggregate(snapshot.observations, 0.5, await analysisOptions(snapshot.observations));
-    store.state.version = 9;
+    store.state.version = 10;
     await store.save();
   }
-  else if ((store.state.version || 1) < 9) { store.state.version = 9; await store.save(); }
+  else if ((store.state.version || 1) < 10) { store.state.version = 10; await store.save(); }
   const appUpdate = { state: 'idle', currentVersion: APP_VERSION, availableVersion: null, downloadedBytes: 0, totalBytes: 0, error: null };
   const startAppUpdate = () => {
     if (['checking', 'downloading', 'installing'].includes(appUpdate.state)) return false;
@@ -192,7 +192,7 @@ export async function createTftServer({ onShutdown = () => {}, onInstallUpdate =
     if (request.method === 'GET' && url.pathname === '/api/metadata') { const locale = url.searchParams.get('locale') === 'en_US' ? 'en_US' : 'es_ES'; return json(response, 200, await metadataFor(url.searchParams.get('patch'), locale)); }
     if (request.method === 'GET' && url.pathname === '/api/evidence') return json(response, 200, evidenceFor(url));
     if (request.method === 'GET' && request.url === '/api/snapshots') return json(response, 200, store.state.snapshots.map((snapshot) => ({ id: snapshot.id, createdAt: snapshot.createdAt, observationCount: snapshot.observations.length, patch: snapshot.observations[0]?.patch || null, set: snapshot.observations[0]?.set || null, sufficiency: snapshot.sufficiency })));
-    if (request.method === 'GET' && url.pathname === '/api/history') return json(response, 200, compareSnapshots(store.state.snapshots.at(-2), store.state.snapshots.at(-1)));
+    if (request.method === 'GET' && url.pathname === '/api/history') { const snapshots = store.currentSnapshots(); return json(response, 200, compareSnapshots(snapshots.at(-2), snapshots.at(-1))); }
     if (request.method === 'GET' && url.pathname === '/api/data-pack/export') {
       const latest = store.latestSnapshot();
       if (!latest) return json(response, 404, { error: 'DATA_PACK_EMPTY' });

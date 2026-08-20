@@ -1,11 +1,19 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { REGIONS, TARGET_OBSERVATIONS_PER_REGION } from '../config.mjs';
+
+export function hasCompleteRegionalCoverage(snapshot, regions = Object.keys(REGIONS), targetPerRegion = TARGET_OBSERVATIONS_PER_REGION) {
+  if (!Array.isArray(snapshot?.observations) || snapshot.observations.length !== regions.length * targetPerRegion) return false;
+  const counts = new Map(regions.map((region) => [region, 0]));
+  for (const observation of snapshot.observations) if (counts.has(observation.region)) counts.set(observation.region, counts.get(observation.region) + 1);
+  return regions.every((region) => counts.get(region) === targetPerRegion);
+}
 
 export class LocalStore {
   constructor(directory) {
     this.directory = directory;
     this.file = join(directory, 'state.json');
-    this.state = { version: 9, settings: { language: 'es' }, snapshots: [], portableMetadata: {}, refreshCheckpoint: null, bundledSnapshotIds: [], bundledSnapshotHashes: {} };
+    this.state = { version: 10, settings: { language: 'es' }, snapshots: [], portableMetadata: {}, refreshCheckpoint: null, bundledSnapshotIds: [], bundledSnapshotHashes: {} };
     this.saveQueue = Promise.resolve();
   }
 
@@ -27,7 +35,11 @@ export class LocalStore {
 
   async updateSettings(settings) { this.state.settings = { ...this.state.settings, ...settings }; await this.save(); return this.state.settings; }
   async updatePortableMetadata(metadata) { this.state.portableMetadata = { ...this.state.portableMetadata, ...metadata }; await this.save(); return this.state.portableMetadata; }
-  latestSnapshot() { return this.state.snapshots.at(-1) || null; }
+  currentSnapshots() {
+    const complete = this.state.snapshots.filter((snapshot) => hasCompleteRegionalCoverage(snapshot));
+    return complete.length ? complete : this.state.snapshots;
+  }
+  latestSnapshot() { return this.currentSnapshots().at(-1) || null; }
   async addSnapshot(snapshot) {
     this.state.snapshots.push(snapshot);
     await this.save();
@@ -58,12 +70,14 @@ export class LocalStore {
       await this.save();
       return { imported: false, reason: 'reconciled' };
     }
-    const result = await this.importSnapshot(snapshot);
-    if (result.imported) {
-      this.state.bundledSnapshotHashes[snapshot.id] = packSha256;
-      await this.save();
-    }
-    return result;
+    const newestSavedAt = this.state.snapshots.reduce((latest, saved) => Math.max(latest, Date.parse(saved.createdAt) || 0), 0);
+    const reason = Date.parse(snapshot.createdAt) > newestSavedAt ? 'newer' : 'canonical_baseline';
+    this.state.snapshots.push(snapshot);
+    this.state.snapshots.sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt) || left.id.localeCompare(right.id));
+    if (!this.state.bundledSnapshotIds.includes(snapshot.id)) this.state.bundledSnapshotIds.push(snapshot.id);
+    this.state.bundledSnapshotHashes[snapshot.id] = packSha256;
+    await this.save();
+    return { imported: true, reason };
   }
   async deleteSnapshot(id) { this.state.snapshots = this.state.snapshots.filter((snapshot) => snapshot.id !== id); await this.save(); }
   async deleteAllSnapshots() { this.state.snapshots = []; await this.save(); }
@@ -72,7 +86,7 @@ export class LocalStore {
     const existingIds = new Set(this.state.snapshots.map((snapshot) => snapshot.id));
     const additions = snapshots.filter((snapshot) => !existingIds.has(snapshot.id));
     const mergedSnapshots = [...this.state.snapshots, ...additions].sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt) || left.id.localeCompare(right.id));
-    this.state = { ...this.state, version: 9, snapshots: mergedSnapshots, portableMetadata: { ...this.state.portableMetadata, ...metadata }, refreshCheckpoint: null };
+    this.state = { ...this.state, version: 10, snapshots: mergedSnapshots, portableMetadata: { ...this.state.portableMetadata, ...metadata }, refreshCheckpoint: null };
     try { await this.save(); }
     catch (error) { this.state = previous; throw error; }
     return {

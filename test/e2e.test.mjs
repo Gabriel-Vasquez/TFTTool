@@ -1,13 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDataPack, parseDataPack } from '../src/persistence/data-pack.mjs';
 
-async function startIsolatedServer(t) {
+async function startIsolatedServer(t, prepare = async () => {}) {
   const directory = await mkdtemp(join(tmpdir(), 'tfttool-e2e-'));
+  await prepare(directory);
   const child = spawn(process.execPath, ['src/server.mjs'], {
     cwd: join(import.meta.dirname, '..'),
     env: { ...process.env, TFTTOOL_DATA_DIR: directory, TFTTOOL_PORT: '0' },
@@ -25,16 +26,39 @@ async function startIsolatedServer(t) {
   });
 }
 
+test('installed upgrade selects the canonical 12,000 baseline while preserving a newer 11,786-record local snapshot', async (t) => {
+  const { url, directory } = await startIsolatedServer(t, async (dataDirectory) => {
+    const pack = parseDataPack(await readFile(join(import.meta.dirname, '..', 'seed', 'latest-snapshot.tftpack')));
+    const canonical = pack.snapshots[0];
+    const partial = {
+      ...canonical,
+      id: 'friend-partial-11786',
+      createdAt: '2026-08-21T00:00:00.000Z',
+      observations: canonical.observations.slice(0, 11_786),
+      result: { ...canonical.result, observations: 11_786 }
+    };
+    await writeFile(join(dataDirectory, 'state.json'), JSON.stringify({ version: 9, settings: { language: 'en' }, snapshots: [partial], portableMetadata: {}, refreshCheckpoint: null, bundledSnapshotIds: [], bundledSnapshotHashes: {} }));
+  });
+  const analysis = await (await fetch(`${url}/api/analysis`)).json();
+  const snapshots = await (await fetch(`${url}/api/snapshots`)).json();
+  const persisted = JSON.parse(await readFile(join(directory, 'state.json'), 'utf8'));
+
+  assert.equal(analysis.result.observations, 12_000);
+  assert.deepEqual(snapshots.map((snapshot) => snapshot.observationCount), [12_000, 11_786]);
+  assert.equal(persisted.settings.language, 'en');
+  assert.equal(persisted.snapshots.length, 2);
+});
+
 test('isolated service serves health, bootstrap, UI, and icon end to end', async (t) => {
   const { url } = await startIsolatedServer(t);
   assert.deepEqual(await (await fetch(`${url}/api/health`)).json(), { ok: true, service: 'tfttool' });
   const bootstrap = await (await fetch(`${url}/api/bootstrap`)).json();
-  assert.equal(bootstrap.appVersion, '0.6.2');
+  assert.equal(bootstrap.appVersion, '0.6.3');
   assert.equal(bootstrap.settings.language, 'es');
   assert.equal(bootstrap.hasApiKey, false);
   assert.equal(bootstrap.refresh.targetPerRegion, 2_000);
   assert.equal(bootstrap.appUpdate.state, 'idle');
-  assert.equal((await (await fetch(`${url}/api/app-update`)).json()).currentVersion, '0.6.2');
+  assert.equal((await (await fetch(`${url}/api/app-update`)).json()).currentVersion, '0.6.3');
   const analysis = await (await fetch(`${url}/api/analysis`)).json();
   assert.equal(analysis.result.observations, 12_000);
   assert.equal(analysis.result.compositions.length, 25);
