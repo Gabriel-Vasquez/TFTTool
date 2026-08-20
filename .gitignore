@@ -1,0 +1,6 @@
+node_modules/
+dist/
+*.dpapi
+state.json
+.qa-data/
+.qa-*/

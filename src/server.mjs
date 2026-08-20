@@ -1,22 +1,222 @@
 import { createServer } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { extname, join } from 'node:path';
+import { APP_VERSION, PREFERRED_PORT, QA_ALLOW_SMALL_SNAPSHOTS, REFRESH_TARGET_PER_REGION, REGIONS, dataDirectory } from './config.mjs';
+import { aggregate } from './domain/aggregate.mjs';
+import { analyzeCurrentSet, selectCurrentSetObservations } from './domain/analysis.mjs';
+import { assessSufficiency } from './domain/stability.mjs';
+import { compareSnapshots } from './domain/history.mjs';
+import { ANALYSIS_VERSION } from './domain/composition.mjs';
+import { isDisplayableUnitId } from './domain/normalization.mjs';
+import { LocalStore } from './persistence/store.mjs';
+import { createDataPack, parseDataPack } from './persistence/data-pack.mjs';
+import { importBundledSnapshot } from './persistence/seed.mjs';
+import { RiotClient } from './riot/client.mjs';
+import { MetadataClient } from './riot/metadata.mjs';
+import { SecretStore } from './security/secrets.mjs';
 
-const preferredPort = 18473;
-const server = createServer((request, response) => {
-  if (request.url === '/health') {
-    response.writeHead(200, { 'content-type': 'application/json' });
-    response.end(JSON.stringify({ ok: true, service: 'tfttool' }));
-    return;
+const publicDirectory = join(import.meta.dirname, '..', 'public');
+const store = new LocalStore(dataDirectory);
+const secrets = new SecretStore(dataDirectory);
+const metadata = new MetadataClient(fetch, { cacheDirectory: join(dataDirectory, 'metadata') });
+const analysisCache = new Map();
+const job = { state: 'idle', stage: 'idle', regions: {}, error: null, startedAt: null, targetPerRegion: REFRESH_TARGET_PER_REGION };
+const json = (response, status, value) => { response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); response.end(JSON.stringify(value)); };
+const body = async (request) => { const chunks = []; for await (const chunk of request) chunks.push(chunk); return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}; };
+const binaryBody = async (request, maximum = 128 * 1024 * 1024) => { const chunks = []; let size = 0; for await (const chunk of request) { size += chunk.length; if (size > maximum) throw new Error('DATA_PACK_SIZE_INVALID'); chunks.push(chunk); } return Buffer.concat(chunks); };
+const trustedLocalMutation = (request) => !request.headers.origin || /^http:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?$/i.test(request.headers.origin);
+
+function metadataBreakpoints(value) {
+  return Object.fromEntries(Object.values(value?.traits || {}).filter((trait) => trait.breakpoints?.length).map((trait) => [trait.id, trait.breakpoints]));
+}
+
+function portableMetadata(locale, patch) {
+  const value = store.state.portableMetadata?.[locale];
+  const line = String(patch || '').match(/\b\d+\.\d+\b/)?.[0];
+  return value && (!line || String(value.version || '').startsWith(`${line}.`)) ? value : null;
+}
+
+async function metadataFor(patch, locale) {
+  return portableMetadata(locale, patch) || metadata.load(patch, locale);
+}
+
+async function portableMetadataForSnapshot(snapshot) {
+  const patch = snapshot?.observations?.[0]?.gameVersion || snapshot?.observations?.[0]?.patch;
+  const entries = await Promise.all(['es_ES', 'en_US'].map(async (locale) => [locale, await metadataFor(patch, locale)]));
+  const values = Object.fromEntries(entries);
+  await store.updatePortableMetadata(values);
+  return values;
+}
+
+async function analysisOptions(observations) {
+  try {
+    const localized = await metadataFor(observations[0]?.gameVersion || observations[0]?.patch, 'es_ES');
+    return { traitBreakpoints: metadataBreakpoints(localized) };
+  } catch { return {}; }
+}
+
+async function refresh() {
+  try {
+    const apiKey = await secrets.getRiotApiKey();
+    if (!apiKey) throw new Error('RIOT_API_KEY_REQUIRED');
+    job.state = 'running'; job.stage = 'collecting'; job.error = null; job.startedAt = new Date().toISOString(); job.regions = {}; job.targetPerRegion = REFRESH_TARGET_PER_REGION;
+    const client = new RiotClient(apiKey, { onProgress: (progress) => { if (progress.region) job.regions[progress.region] = { ...job.regions[progress.region], ...progress }; } });
+    const savedCheckpoint = store.state.refreshCheckpoint;
+    const checkpointAge = savedCheckpoint?.startedAt ? Date.now() - new Date(savedCheckpoint.startedAt).getTime() : Infinity;
+    const latest = store.latestSnapshot();
+    const incrementalRegions = Object.fromEntries(Object.keys(REGIONS).map((region) => {
+      const priorProgress = latest?.collection?.regions?.[region];
+      return [region, {
+        observations: (latest?.observations || []).filter((observation) => observation.region === region),
+        playersScanned: 0,
+        currentPatch: null,
+        completed: false,
+        incremental: Boolean(latest),
+        scanLimit: Math.max(25, priorProgress?.playersScanned || 25)
+      }];
+    }));
+    const checkpoint = checkpointAge <= 6 * 60 * 60 * 1_000 ? savedCheckpoint : { startedAt: job.startedAt, regions: incrementalRegions };
+    const collectedObservations = await client.sampleAll({
+      target: REFRESH_TARGET_PER_REGION,
+      resume: checkpoint.regions,
+      onCheckpoint: async (region, state) => { checkpoint.regions[region] = state; await store.saveRefreshCheckpoint(checkpoint); }
+    });
+    const observations = selectCurrentSetObservations(collectedObservations);
+    job.stage = 'processing';
+    const result = analyzeCurrentSet(observations, 0.5, await analysisOptions(observations)).result;
+    const sufficiency = assessSufficiency(observations, result, Object.keys(REGIONS));
+    const collection = { targetPerRegion: REFRESH_TARGET_PER_REGION, mode: latest ? 'incremental' : 'full', regions: Object.fromEntries(Object.entries(job.regions).map(([region, progress]) => [region, { playersScanned: progress.playersScanned || 0, observations: progress.observations || 0 }])) };
+    const snapshot = { id: crypto.randomUUID(), createdAt: new Date().toISOString(), observations, result, sufficiency, collection };
+    job.stage = 'saving';
+    if (sufficiency.publishable || QA_ALLOW_SMALL_SNAPSHOTS) { await store.addSnapshot(snapshot); await portableMetadataForSnapshot(snapshot).catch(() => {}); analysisCache.clear(); }
+    await store.clearRefreshCheckpoint();
+    job.state = 'completed'; job.stage = 'completed'; job.completedAt = new Date().toISOString(); job.sufficiency = sufficiency;
+  } catch (error) { job.state = 'failed'; job.stage = 'failed'; job.error = error.message; }
+}
+
+export async function serveStatic(request, response) {
+  const requestPath = request.url === '/' ? '/index.html' : request.url;
+  const safePath = requestPath.split('?')[0].replace(/^\/+/, '');
+  if (safePath.includes('..')) return json(response, 400, { error: 'invalid_path' });
+  const type = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8' }[extname(safePath)] || 'application/octet-stream';
+  try { const content = await readFile(join(publicDirectory, safePath)); response.writeHead(200, { 'content-type': type, 'cache-control': 'no-cache' }); response.end(content); } catch { if (!response.headersSent) json(response, 404, { error: 'not_found' }); }
+}
+
+function requestedSnapshot(url) {
+  const id = url.searchParams.get('snapshot');
+  return id ? store.state.snapshots.find((snapshot) => snapshot.id === id) : store.latestSnapshot();
+}
+
+function responseResult(result) {
+  const withoutEvidence = (items) => items.map(({ evidence, ...item }) => item);
+  const { assignments, traitBreakpoints, ...publicResult } = result;
+  return { ...publicResult, compositions: withoutEvidence(result.compositions), items: withoutEvidence(result.items), champions: withoutEvidence(result.champions), synergies: withoutEvidence(result.synergies) };
+}
+
+function resultFor(snapshot, region = 'GLOBAL') {
+  if (region === 'GLOBAL') return snapshot.result;
+  const key = `${snapshot.id}:${region}`;
+  if (!analysisCache.has(key)) {
+    const observations = snapshot.observations.filter((item) => item.region === region);
+    analysisCache.set(key, aggregate(observations, 0.5, { traitBreakpoints: snapshot.result.traitBreakpoints || {} }));
   }
-  response.writeHead(404, { 'content-type': 'application/json' });
-  response.end(JSON.stringify({ error: 'not_found' }));
-});
+  return analysisCache.get(key);
+}
 
-server.listen(preferredPort, '127.0.0.1', () => {
-  const address = server.address();
-  console.log(`TFTTool service listening on http://127.0.0.1:${address.port}`);
-});
+function analysisFor(url) {
+  const snapshot = requestedSnapshot(url);
+  if (!snapshot) return null;
+  const region = url.searchParams.get('region') || 'GLOBAL';
+  const observations = region === 'GLOBAL' ? snapshot.observations : snapshot.observations.filter((item) => item.region === region);
+  const result = resultFor(snapshot, region);
+  return { id: snapshot.id, createdAt: snapshot.createdAt, patch: observations[0]?.patch || null, set: observations[0]?.set || null, sufficiency: snapshot.sufficiency, result: responseResult(result), regions: [...new Set(observations.map((item) => item.region))] };
+}
 
-server.on('error', (error) => {
-  if (error.code !== 'EADDRINUSE') throw error;
-  server.listen(0, '127.0.0.1');
-});
+function evidenceFor(url) {
+  const snapshot = requestedSnapshot(url);
+  if (!snapshot) return [];
+  const type = url.searchParams.get('type'); const id = url.searchParams.get('id'); const region = url.searchParams.get('region') || 'GLOBAL';
+  const result = resultFor(snapshot, region);
+  const matches = snapshot.observations.filter((item) => {
+    if (region !== 'GLOBAL' && item.region !== region) return false;
+    if (type === 'composition') return result.assignments[item.id] === id;
+    if (type === 'composition-champion') return result.assignments[item.id] === url.searchParams.get('composition') && item.units.some((unit) => unit.id === id);
+    if (type === 'items') return item.units.some((unit) => unit.items.includes(id));
+    if (type === 'champions') return item.units.some((unit) => unit.id === id);
+    if (type === 'synergies') return item.traits.some((trait) => `${trait.id}:${trait.tier}` === id);
+    return false;
+  });
+  return matches.sort((a, b) => new Date(b.recordedAt) - new Date(a.recordedAt)).slice(0, 200).map((item) => ({ ...item, compositionId: result.assignments[item.id] }));
+}
+
+export async function createTftServer({ onShutdown = () => {} } = {}) {
+  await store.load();
+  await importBundledSnapshot(store);
+  const analysisMigrationRequired = (store.state.version || 1) < 7 || store.state.snapshots.some((snapshot) => snapshot.result?.analysisVersion !== ANALYSIS_VERSION);
+  if (analysisMigrationRequired) {
+    store.state.snapshots = store.state.snapshots.map((snapshot) => {
+      const observations = snapshot.observations.map((observation) => ({ ...observation, units: observation.units.filter((unit) => isDisplayableUnitId(unit.id)) }));
+      return { ...snapshot, observations };
+    });
+    for (const snapshot of store.state.snapshots) snapshot.result = aggregate(snapshot.observations, 0.5, await analysisOptions(snapshot.observations));
+    store.state.version = 8;
+    await store.save();
+  }
+  else if ((store.state.version || 1) < 8) { store.state.version = 8; await store.save(); }
+  return createServer(async (request, response) => {
+  try {
+    const url = new URL(request.url, 'http://127.0.0.1');
+    if (['POST', 'PUT', 'DELETE'].includes(request.method) && !trustedLocalMutation(request)) return json(response, 403, { error: 'untrusted_origin' });
+    if (request.method === 'GET' && request.url === '/api/health') return json(response, 200, { ok: true, service: 'tfttool' });
+    if (request.method === 'GET' && request.url === '/api/bootstrap') return json(response, 200, { settings: store.state.settings, refresh: job, hasApiKey: Boolean(await secrets.getRiotApiKey()) });
+    if (request.method === 'GET' && url.pathname === '/api/analysis') return json(response, 200, analysisFor(url));
+    if (request.method === 'GET' && url.pathname === '/api/metadata') { const locale = url.searchParams.get('locale') === 'en_US' ? 'en_US' : 'es_ES'; return json(response, 200, await metadataFor(url.searchParams.get('patch'), locale)); }
+    if (request.method === 'GET' && url.pathname === '/api/evidence') return json(response, 200, evidenceFor(url));
+    if (request.method === 'GET' && request.url === '/api/snapshots') return json(response, 200, store.state.snapshots.map((snapshot) => ({ id: snapshot.id, createdAt: snapshot.createdAt, observationCount: snapshot.observations.length, patch: snapshot.observations[0]?.patch || null, set: snapshot.observations[0]?.set || null, sufficiency: snapshot.sufficiency })));
+    if (request.method === 'GET' && url.pathname === '/api/history') return json(response, 200, compareSnapshots(store.state.snapshots.at(-2), store.state.snapshots.at(-1)));
+    if (request.method === 'GET' && url.pathname === '/api/data-pack/export') {
+      const latest = store.latestSnapshot();
+      if (!latest) return json(response, 404, { error: 'DATA_PACK_EMPTY' });
+      const portable = await portableMetadataForSnapshot(latest);
+      const pack = createDataPack({ snapshots: store.state.snapshots, metadata: portable, appVersion: APP_VERSION });
+      const stamp = new Date().toISOString().slice(0, 10);
+      response.writeHead(200, { 'content-type': 'application/vnd.tfttool.pack', 'content-disposition': `attachment; filename="TFTTool-${stamp}.tftpack"`, 'content-length': pack.length, 'cache-control': 'no-store' });
+      response.end(pack);
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/data-pack/import') {
+      const pack = parseDataPack(await binaryBody(request));
+      const traitBreakpoints = metadataBreakpoints(pack.metadata.es_ES);
+      for (const snapshot of pack.snapshots) if (snapshot.result?.analysisVersion !== ANALYSIS_VERSION) { const analyzed = analyzeCurrentSet(snapshot.observations, 0.5, { traitBreakpoints }); snapshot.observations = analyzed.observations; snapshot.result = analyzed.result; }
+      const imported = await store.replacePortableData({ snapshots: pack.snapshots, metadata: pack.metadata });
+      analysisCache.clear();
+      return json(response, 200, { ...imported, manifest: pack.manifest });
+    }
+    if (request.method === 'PUT' && request.url === '/api/settings') { const settings = await body(request); if (settings.language && !['es', 'en'].includes(settings.language)) return json(response, 400, { error: 'language_not_supported' }); return json(response, 200, await store.updateSettings(settings)); }
+    if (request.method === 'PUT' && request.url === '/api/settings/riot-key') { await secrets.setRiotApiKey((await body(request)).key); return json(response, 204, {}); }
+    if (request.method === 'POST' && request.url === '/api/refresh') { if (job.state === 'running') return json(response, 409, { error: 'refresh_in_progress' }); void refresh(); return json(response, 202, { state: 'started' }); }
+    if (request.method === 'DELETE' && request.url?.startsWith('/api/snapshots/')) { await store.deleteSnapshot(decodeURIComponent(request.url.slice('/api/snapshots/'.length))); analysisCache.clear(); return json(response, 204, {}); }
+    if (request.method === 'DELETE' && request.url === '/api/snapshots') { await store.deleteAllSnapshots(); analysisCache.clear(); return json(response, 204, {}); }
+    if (request.method === 'POST' && request.url === '/api/shutdown') { json(response, 202, { state: 'stopping' }); setTimeout(onShutdown, 50); return; }
+    return serveStatic(request, response);
+  } catch (error) { const status = error instanceof SyntaxError || /required|format is not valid|^DATA_PACK_/i.test(error.message) ? 400 : 500; return json(response, status, { error: error.message || 'internal_error' }); }
+  });
+}
+
+export async function startTftServer(port = PREFERRED_PORT, options = {}) {
+  const server = await createTftServer(options);
+  return new Promise((resolve, reject) => {
+    let fallbackUsed = false;
+    server.on('error', (error) => {
+      if (error.code === 'EADDRINUSE' && !fallbackUsed) { fallbackUsed = true; server.listen(0, '127.0.0.1'); return; }
+      reject(error);
+    });
+    server.on('listening', () => resolve({ server, port: server.address().port }));
+    server.listen(port, '127.0.0.1');
+  });
+}
+
+if (process.argv[1] && import.meta.filename === process.argv[1]) {
+  const { port } = await startTftServer(process.env.TFTTOOL_PORT ? Number(process.env.TFTTOOL_PORT) : PREFERRED_PORT);
+  console.log(`TFTTool listening on http://127.0.0.1:${port}`);
+}
