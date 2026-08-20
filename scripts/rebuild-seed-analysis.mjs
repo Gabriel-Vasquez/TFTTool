@@ -1,13 +1,17 @@
 import { createHash } from 'node:crypto';
 import { readFile, rename, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { extname, resolve } from 'node:path';
+import { APP_VERSION } from '../src/config.mjs';
 import { analyzeCurrentSet } from '../src/domain/analysis.mjs';
+import { createDataPack, parseDataPack } from '../src/persistence/data-pack.mjs';
 import { MetadataClient } from '../src/riot/metadata.mjs';
 
-const file = resolve(process.argv[2] || 'seed/latest-snapshot.json');
+const file = resolve(process.argv[2] || 'seed/latest-snapshot.tftpack');
 const cacheDirectory = resolve(process.argv[3] || '.qa-data/metadata');
-const bundle = JSON.parse(await readFile(file, 'utf8'));
-const snapshot = bundle.snapshot;
+const packedSeed = extname(file).toLowerCase() === '.tftpack';
+const input = await readFile(file);
+const document = packedSeed ? parseDataPack(input) : JSON.parse(input.toString('utf8'));
+const snapshot = packedSeed ? document.snapshots.at(-1) : document.snapshot;
 if (!snapshot?.observations?.length) throw new Error('Snapshot observations are required.');
 
 const digest = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -19,8 +23,10 @@ const traitBreakpoints = Object.fromEntries(Object.values(portableMetadata.es_ES
 const analyzed = analyzeCurrentSet(snapshot.observations, 0.5, { traitBreakpoints });
 snapshot.observations = analyzed.observations;
 snapshot.result = analyzed.result;
-bundle.formatVersion = 2;
-bundle.metadata = portableMetadata;
+if (!packedSeed) {
+  document.formatVersion = 2;
+  document.metadata = portableMetadata;
+}
 
 const assignedObservations = Object.keys(snapshot.result.assignments).length;
 const prevalenceTotal = snapshot.result.compositions.reduce((total, composition) => total + composition.prevalence, 0);
@@ -31,11 +37,25 @@ if (Math.abs(prevalenceTotal - 1) > 1e-9) throw new Error('Archetype prevalence 
 if (maximumItemPrevalence > 1) throw new Error('Item prevalence exceeded 100%.');
 
 const temporary = `${file}.tmp`;
-await writeFile(temporary, JSON.stringify(bundle), 'utf8');
+const output = packedSeed ? createDataPack({ snapshots: [snapshot], metadata: portableMetadata, appVersion: APP_VERSION }) : JSON.stringify(document);
+await writeFile(temporary, output);
 await rename(temporary, file);
 
 const afterObservations = digest(snapshot.observations);
 if (beforeObservations !== afterObservations) throw new Error('Observation payload changed during analysis rebuild.');
+if (packedSeed) {
+  const regionalCounts = Object.fromEntries([...new Set(snapshot.observations.map((observation) => observation.region))].sort().map((region) => [region, snapshot.observations.filter((observation) => observation.region === region).length]));
+  const manifest = {
+    format: 'tfttool-bundled-data', version: 1, snapshotId: snapshot.id, createdAt: snapshot.createdAt,
+    observationCount: snapshot.observations.length, analysisVersion: snapshot.result.analysisVersion,
+    interactionAnalysisVersion: snapshot.result.interactions?.analysisVersion || null, regionalCounts,
+    packBytes: output.length, packSha256: createHash('sha256').update(output).digest('hex')
+  };
+  const manifestFile = file.replace(/\.tftpack$/i, '.manifest.json');
+  const temporaryManifest = `${manifestFile}.tmp`;
+  await writeFile(temporaryManifest, JSON.stringify(manifest), 'utf8');
+  await rename(temporaryManifest, manifestFile);
+}
 console.log(JSON.stringify({
   analysisVersion: snapshot.result.analysisVersion,
   observations: snapshot.result.observations,

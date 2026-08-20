@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createDataPack, parseDataPack } from '../src/persistence/data-pack.mjs';
 
 async function startIsolatedServer(t) {
   const directory = await mkdtemp(join(tmpdir(), 'tfttool-e2e-'));
@@ -71,7 +72,19 @@ test('isolated teammate flow exports and imports portable data without a Riot ke
   assert.ok(pack.byteLength > 1_000_000);
   const imported = await fetch(`${url}/api/data-pack/import`, { method: 'POST', headers: { 'content-type': 'application/vnd.tfttool.pack' }, body: pack });
   assert.equal(imported.status, 200);
-  assert.equal((await imported.json()).observations, 12_000);
+  const importResult = await imported.json();
+  assert.equal(importResult.observations, 12_000);
+  assert.equal(importResult.importedSnapshots, 0);
+  assert.equal(importResult.skippedSnapshots, 1);
+  const parsed = parseDataPack(Buffer.from(pack));
+  const incomingSnapshot = { ...parsed.snapshots[0], id: 'teammate-data-update', createdAt: '2026-08-21T00:00:00.000Z' };
+  const updatePack = createDataPack({ snapshots: [incomingSnapshot], metadata: parsed.metadata, appVersion: '0.4.1' });
+  const updateResponse = await fetch(`${url}/api/data-pack/import`, { method: 'POST', headers: { 'content-type': 'application/vnd.tfttool.pack' }, body: updatePack });
+  assert.equal(updateResponse.status, 200);
+  const updateResult = await updateResponse.json();
+  assert.equal(updateResult.importedSnapshots, 1);
+  assert.equal(updateResult.snapshots, 2);
+  assert.equal(updateResult.observations, 24_000);
   const bootstrap = await (await fetch(`${url}/api/bootstrap`)).json();
   assert.equal(bootstrap.settings.language, 'en');
   assert.equal(bootstrap.hasApiKey, false);

@@ -83,7 +83,11 @@ test('Riot key save intercepts the dialog submit and persists before refresh', a
 });
 
 test('portable data controls export and atomically import one tftpack without a Riot request', async () => {
-  const app = await readFile(join(root, 'public', 'app.js'), 'utf8');
+  const [html, app] = await Promise.all([
+    readFile(join(root, 'public', 'index.html'), 'utf8'),
+    readFile(join(root, 'public', 'app.js'), 'utf8')
+  ]);
+  assert.match(html, /id="update"/);
   assert.match(app, /data-export-pack/);
   assert.match(app, /data-import-pack/);
   assert.match(app, /\.tftpack/);
@@ -115,4 +119,29 @@ test('Team Interactions is localized, compact by default, and expands to the com
   assert.match(app, /state\.expandedInteractions/);
   assert.match(css, /\.interaction-summary/);
   assert.match(css, /\.interaction-table-row/);
+});
+
+test('packaged launcher opens a secured standalone Electron window instead of a browser', async () => {
+  const launcher = await readFile(join(root, 'electron', 'main.cjs'), 'utf8');
+  assert.match(launcher, /BrowserWindow/);
+  assert.match(launcher, /mainWindow\.loadURL\(url\)/);
+  assert.match(launcher, /contextIsolation: true/);
+  assert.match(launcher, /nodeIntegration: false/);
+  assert.match(launcher, /sandbox: true/);
+  assert.match(launcher, /process\.env\.TFTTOOL_PORT/);
+  assert.doesNotMatch(launcher, /openExternal/);
+});
+
+test('0.6 package keeps only supported Electron languages and loads independent startup data concurrently', async () => {
+  const [configuration, app] = await Promise.all([
+    readFile(join(root, 'package.json'), 'utf8'),
+    readFile(join(root, 'public', 'app.js'), 'utf8')
+  ]);
+  const packageJson = JSON.parse(configuration);
+  assert.deepEqual(packageJson.build.electronLanguages, ['en-US', 'es']);
+  assert.equal(packageJson.build.compression, 'maximum');
+  assert.ok(packageJson.build.files.includes('seed/latest-snapshot.tftpack'));
+  assert.ok(!packageJson.build.files.includes('seed/**/*'));
+  assert.match(app, /Promise\.all\(\[api\('\/api\/bootstrap'\), api\('\/api\/snapshots'\)\]\)/);
+  assert.match(app, /Promise\.all\(\[api\(`\/api\/analysis/);
 });

@@ -1,6 +1,6 @@
 {
   "name": "tfttool",
-  "version": "0.4.0",
+  "version": "0.6.0",
   "description": "Local TFT elite meta analytics powered by official Riot data.",
   "author": "Gabriel Vasquez",
   "private": true,
@@ -19,8 +19,10 @@
   "build": {
     "appId": "com.gabrielvasquez.tfttool",
     "productName": "TFTTool",
-    "files": ["src/**/*", "public/**/*", "electron/**/*", "seed/**/*", "package.json"],
-    "asarUnpack": ["src/**/*", "seed/**/*"],
+    "compression": "maximum",
+    "electronLanguages": ["en-US", "es"],
+    "files": ["src/**/*", "public/**/*", "electron/**/*", "seed/latest-snapshot.tftpack", "seed/latest-snapshot.manifest.json", "package.json"],
+    "asarUnpack": ["src/**/*"],
     "win": { "target": ["nsis"], "icon": "build/icon.ico" },
     "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true, "createStartMenuShortcut": true }
   }

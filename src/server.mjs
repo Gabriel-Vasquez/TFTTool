@@ -188,7 +188,7 @@ export async function createTftServer({ onShutdown = () => {} } = {}) {
       const pack = parseDataPack(await binaryBody(request));
       const traitBreakpoints = metadataBreakpoints(pack.metadata.es_ES);
       for (const snapshot of pack.snapshots) if (snapshot.result?.analysisVersion !== ANALYSIS_VERSION) { const analyzed = analyzeCurrentSet(snapshot.observations, 0.5, { traitBreakpoints }); snapshot.observations = analyzed.observations; snapshot.result = analyzed.result; }
-      const imported = await store.replacePortableData({ snapshots: pack.snapshots, metadata: pack.metadata });
+      const imported = await store.importPortableData({ snapshots: pack.snapshots, metadata: pack.metadata });
       analysisCache.clear();
       return json(response, 200, { ...imported, manifest: pack.manifest });
     }

@@ -1,12 +1,13 @@
-const { app, dialog, shell } = require('electron');
+const { app, BrowserWindow, dialog } = require('electron');
 const { join } = require('node:path');
 const { pathToFileURL } = require('node:url');
 const net = require('node:net');
 const { mkdirSync } = require('node:fs');
 
-const preferredPort = 18473;
+const preferredPort = Number(process.env.TFTTOOL_PORT) || 18473;
 let service;
 let serviceUrl;
+let mainWindow;
 
 if (process.env.TFTTOOL_ELECTRON_USER_DATA) {
   mkdirSync(process.env.TFTTOOL_ELECTRON_USER_DATA, { recursive: true });
@@ -41,13 +42,37 @@ async function launch() {
   serviceUrl = url;
   await waitForService(url);
   if (process.env.TFTTOOL_SMOKE_TEST === '1') { setTimeout(() => app.quit(), 2_000); return; }
-  if (process.env.TFTTOOL_NO_OPEN !== '1') await shell.openExternal(url);
+  const showWindow = process.env.TFTTOOL_NO_OPEN !== '1';
+  mainWindow = new BrowserWindow({
+    width: 1440,
+    height: 920,
+    minWidth: 1024,
+    minHeight: 680,
+    show: false,
+    autoHideMenuBar: true,
+    backgroundColor: '#080b12',
+    title: 'TFTTool',
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.once('ready-to-show', () => { if (showWindow) mainWindow?.show(); });
+  mainWindow.on('closed', () => { mainWindow = null; app.quit(); });
+  await mainWindow.loadURL(url);
 }
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) app.quit();
 else {
-  app.on('second-instance', () => { if (serviceUrl) void shell.openExternal(serviceUrl); });
+  app.on('second-instance', () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
   app.whenReady().then(launch).catch((error) => { dialog.showErrorBox('TFTTool could not start', error.message); app.quit(); });
 }
 app.on('will-quit', () => service?.close());

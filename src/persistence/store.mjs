@@ -48,12 +48,20 @@ export class LocalStore {
   }
   async deleteSnapshot(id) { this.state.snapshots = this.state.snapshots.filter((snapshot) => snapshot.id !== id); await this.save(); }
   async deleteAllSnapshots() { this.state.snapshots = []; await this.save(); }
-  async replacePortableData({ snapshots, metadata }) {
+  async importPortableData({ snapshots, metadata }) {
     const previous = this.state;
-    this.state = { ...this.state, version: 8, snapshots, portableMetadata: metadata, refreshCheckpoint: null };
+    const existingIds = new Set(this.state.snapshots.map((snapshot) => snapshot.id));
+    const additions = snapshots.filter((snapshot) => !existingIds.has(snapshot.id));
+    const mergedSnapshots = [...this.state.snapshots, ...additions].sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt) || left.id.localeCompare(right.id));
+    this.state = { ...this.state, version: 8, snapshots: mergedSnapshots, portableMetadata: { ...this.state.portableMetadata, ...metadata }, refreshCheckpoint: null };
     try { await this.save(); }
     catch (error) { this.state = previous; throw error; }
-    return { snapshots: snapshots.length, observations: snapshots.reduce((total, snapshot) => total + snapshot.observations.length, 0) };
+    return {
+      importedSnapshots: additions.length,
+      skippedSnapshots: snapshots.length - additions.length,
+      snapshots: mergedSnapshots.length,
+      observations: mergedSnapshots.reduce((total, snapshot) => total + snapshot.observations.length, 0)
+    };
   }
   async saveRefreshCheckpoint(checkpoint) { this.state.refreshCheckpoint = checkpoint; await this.save(); }
   async clearRefreshCheckpoint() { this.state.refreshCheckpoint = null; await this.save(); }
