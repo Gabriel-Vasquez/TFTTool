@@ -53,12 +53,12 @@ test('isolated service serves health, bootstrap, UI, and icon end to end', async
   const { url } = await startIsolatedServer(t);
   assert.deepEqual(await (await fetch(`${url}/api/health`)).json(), { ok: true, service: 'tfttool' });
   const bootstrap = await (await fetch(`${url}/api/bootstrap`)).json();
-  assert.equal(bootstrap.appVersion, '0.6.3');
+  assert.equal(bootstrap.appVersion, '0.6.4');
   assert.equal(bootstrap.settings.language, 'es');
   assert.equal(bootstrap.hasApiKey, false);
   assert.equal(bootstrap.refresh.targetPerRegion, 2_000);
   assert.equal(bootstrap.appUpdate.state, 'idle');
-  assert.equal((await (await fetch(`${url}/api/app-update`)).json()).currentVersion, '0.6.3');
+  assert.equal((await (await fetch(`${url}/api/app-update`)).json()).currentVersion, '0.6.4');
   const analysis = await (await fetch(`${url}/api/analysis`)).json();
   assert.equal(analysis.result.observations, 12_000);
   assert.equal(analysis.result.compositions.length, 25);
