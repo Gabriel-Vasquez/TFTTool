@@ -161,10 +161,10 @@ export async function createTftServer({ onShutdown = () => {}, onInstallUpdate =
       return { ...snapshot, observations };
     });
     for (const snapshot of store.state.snapshots) snapshot.result = aggregate(snapshot.observations, 0.5, await analysisOptions(snapshot.observations));
-    store.state.version = 10;
+    store.state.version = 11;
     await store.save();
   }
-  else if ((store.state.version || 1) < 10) { store.state.version = 10; await store.save(); }
+  else if ((store.state.version || 1) < 11) { store.state.version = 11; await store.save(); }
   const appUpdate = { state: 'idle', currentVersion: APP_VERSION, availableVersion: null, downloadedBytes: 0, totalBytes: 0, error: null };
   const startAppUpdate = () => {
     if (['checking', 'downloading', 'installing'].includes(appUpdate.state)) return false;
@@ -186,7 +186,7 @@ export async function createTftServer({ onShutdown = () => {}, onInstallUpdate =
     const url = new URL(request.url, 'http://127.0.0.1');
     if (['POST', 'PUT', 'DELETE'].includes(request.method) && !trustedLocalMutation(request)) return json(response, 403, { error: 'untrusted_origin' });
     if (request.method === 'GET' && request.url === '/api/health') return json(response, 200, { ok: true, service: 'tfttool' });
-    if (request.method === 'GET' && request.url === '/api/bootstrap') return json(response, 200, { appVersion: APP_VERSION, settings: store.state.settings, refresh: job, appUpdate, hasApiKey: Boolean(await secrets.getRiotApiKey()) });
+    if (request.method === 'GET' && request.url === '/api/bootstrap') return json(response, 200, { appVersion: APP_VERSION, settings: store.state.settings, favorites: store.state.favorites, refresh: job, appUpdate, hasApiKey: Boolean(await secrets.getRiotApiKey()) });
     if (request.method === 'GET' && request.url === '/api/app-update') return json(response, 200, appUpdate);
     if (request.method === 'POST' && request.url === '/api/app-update') { const started = startAppUpdate(); return json(response, started ? 202 : 409, appUpdate); }
     if (request.method === 'GET' && url.pathname === '/api/analysis') return json(response, 200, analysisFor(url));
@@ -218,14 +218,15 @@ export async function createTftServer({ onShutdown = () => {}, onInstallUpdate =
       analysisCache.clear();
       return json(response, 200, { ...imported, manifest: pack.manifest });
     }
-    if (request.method === 'PUT' && request.url === '/api/settings') { const settings = await body(request); if (settings.language && !['es', 'en'].includes(settings.language)) return json(response, 400, { error: 'language_not_supported' }); return json(response, 200, await store.updateSettings(settings)); }
+    if (request.method === 'PUT' && request.url === '/api/settings') { const settings = await body(request); if (settings.language && !['es', 'en'].includes(settings.language)) return json(response, 400, { error: 'language_not_supported' }); if (settings.layout && !['standard', 'compact'].includes(settings.layout)) return json(response, 400, { error: 'layout_not_supported' }); return json(response, 200, await store.updateSettings(settings)); }
+    if (request.method === 'PUT' && request.url === '/api/favorites') { const payload = await body(request); return json(response, 200, await store.setFavorite(payload.favorite, payload.active)); }
     if (request.method === 'PUT' && request.url === '/api/settings/riot-key') { await secrets.setRiotApiKey((await body(request)).key); return json(response, 204, {}); }
     if (request.method === 'POST' && request.url === '/api/refresh') { if (job.state === 'running') return json(response, 409, { error: 'refresh_in_progress' }); void refresh(); return json(response, 202, { state: 'started' }); }
     if (request.method === 'DELETE' && request.url?.startsWith('/api/snapshots/')) { await store.deleteSnapshot(decodeURIComponent(request.url.slice('/api/snapshots/'.length))); analysisCache.clear(); return json(response, 204, {}); }
     if (request.method === 'DELETE' && request.url === '/api/snapshots') { await store.deleteAllSnapshots(); analysisCache.clear(); return json(response, 204, {}); }
     if (request.method === 'POST' && request.url === '/api/shutdown') { json(response, 202, { state: 'stopping' }); setTimeout(onShutdown, 50); return; }
     return serveStatic(request, response);
-  } catch (error) { const status = error instanceof SyntaxError || /required|format is not valid|^DATA_PACK_/i.test(error.message) ? 400 : 500; return json(response, status, { error: error.message || 'internal_error' }); }
+  } catch (error) { const status = error instanceof SyntaxError || /required|format is not valid|^DATA_PACK_|^FAVORITE_/i.test(error.message) ? 400 : 500; return json(response, status, { error: error.message || 'internal_error' }); }
   });
 }
 

@@ -45,6 +45,23 @@ test('concurrent local mutations serialize atomic state writes', async (t) => {
   assert.ok(saved.refreshCheckpoint.startedAt);
 });
 
+test('favorites are canonical, local, and preserved by portable data imports', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'tfttool-store-favorites-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = new LocalStore(directory);
+  await store.load();
+  await store.setFavorite({ kind: 'variant', compositionId: 'core:Carry+Tank', championIds: ['Carry', 'Tank'] }, true);
+  await store.setFavorite({ kind: 'archetype', compositionId: 'core:Carry+Tank' }, true);
+  await store.importPortableData({ snapshots: [], metadata: { en_US: { version: 'future' } } });
+  assert.deepEqual(store.state.favorites, [
+    { kind: 'archetype', compositionId: 'core:Carry+Tank' },
+    { kind: 'variant', compositionId: 'core:Carry+Tank', championIds: ['Carry', 'Tank'] }
+  ]);
+  const reloaded = new LocalStore(directory);
+  await reloaded.load();
+  assert.deepEqual(reloaded.state.favorites, store.state.favorites);
+});
+
 test('bundled snapshot imports only when newer and preserves history and settings', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'tfttool-store-seed-'));
   t.after(() => rm(directory, { recursive: true, force: true }));

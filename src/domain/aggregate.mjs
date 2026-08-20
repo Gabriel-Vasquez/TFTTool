@@ -1,6 +1,7 @@
 import { ANALYSIS_VERSION, activeTraits, clusterCompositions, lineupIdentity } from './composition.mjs';
 import { analyzeInteractions } from './interactions.mjs';
 import { isAnalyticItem } from './item-taxonomy.mjs';
+import { deriveModeledProgression } from './progression.mjs';
 import { scoreByPrevalenceAndPlacement } from './score.mjs';
 
 const increment = (map, key, value = 1) => map.set(key, (map.get(key) || 0) + value);
@@ -147,7 +148,7 @@ export function aggregate(observations, prevalenceWeight = 0.5, { traitBreakpoin
       ...entityMetrics(variantSamples),
       champions: championDetails(variantSamples, itemMetadata)
     })).sort((a, b) => b.sampleSize - a.sampleSize || a.id.localeCompare(b.id));
-    return {
+    const composition = {
       id: cluster.id,
       name: cluster.id,
       prevalence: samples.length / Math.max(1, observations.length),
@@ -159,6 +160,7 @@ export function aggregate(observations, prevalenceWeight = 0.5, { traitBreakpoin
       variantCount: allVariants.length,
       variants: allVariants.slice(0, 12)
     };
+    return { ...composition, progression: deriveModeledProgression(samples, composition) };
   });
   const compositionContext = (observation) => clustered.assignments[observation.id];
   const scoreEntities = (items) => scoreByPrevalenceAndPlacement(items, prevalenceWeight);

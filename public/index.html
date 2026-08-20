@@ -14,6 +14,7 @@
         <div class="brand"><span class="brand-mark">T</span><span>TFT<span>Tool</span></span></div>
         <nav id="tabs" aria-label="Navegación principal">
           <button class="nav active" data-tab="home">◈ <span data-copy="homeNav">Meta</span></button>
+          <button class="nav" data-tab="favorites">★ <span data-copy="favorites">Favoritos</span></button>
           <button class="nav" data-tab="items">◇ <span data-copy="items">Objetos</span></button>
           <button class="nav" data-tab="champions">♙ <span data-copy="champions">Campeones</span></button>
           <button class="nav" data-tab="synergies">◌ <span data-copy="synergies">Sinergias</span></button>
@@ -31,7 +32,7 @@
           <div class="top-actions"><button id="language-toggle" class="language-toggle" title="Switch language">ES / EN</button><select id="region-filter"><option value="GLOBAL" data-copy="globalRegions">Global · todas las regiones</option><option>EUW</option><option>NA</option><option>KR</option><option>BR</option><option>LAN</option><option>LAS</option></select><button id="update" class="primary" data-copy="update">Actualizar datos</button></div>
         </header>
         <section id="progress" class="progress hidden"></section>
-        <section class="toolbar"><label class="search"><span>⌕</span><input id="search" placeholder="Buscar campeones, objetos o sinergias"></label><label class="slider-label"><span data-copy="establishedMeta">Meta establecido</span> <input id="weight" type="range" min="0" max="100" value="50" title="50% prevalencia · 50% posición media"> <span data-copy="performance">Rendimiento</span></label><span id="weight-value">50 / 50</span><span class="icon-wrap score-help" tabindex="0" aria-label="Cómo se calcula la puntuación">ⓘ<span class="tooltip" id="score-tooltip">50% prevalencia · 50% posición media. Ambas métricas se normalizan y una posición menor es mejor.</span></span></section>
+        <section class="toolbar"><label class="search"><span>⌕</span><input id="search" placeholder="Buscar campeones, objetos o sinergias"></label><label class="layout-control"><span id="layout-label">Diseño</span><select id="layout-selector"><option value="standard">Estándar</option><option value="compact">Compacto</option></select></label><label class="slider-label"><span data-copy="establishedMeta">Meta establecido</span> <input id="weight" type="range" min="0" max="100" value="50" title="50% prevalencia · 50% posición media"> <span data-copy="performance">Rendimiento</span></label><span id="weight-value">50 / 50</span><span class="icon-wrap score-help" tabindex="0" aria-label="Cómo se calcula la puntuación">ⓘ<span class="tooltip" id="score-tooltip">50% prevalencia · 50% posición media. Ambas métricas se normalizan y una posición menor es mejor.</span></span></section>
         <section id="content" aria-live="polite"></section>
       </main>
     </div>

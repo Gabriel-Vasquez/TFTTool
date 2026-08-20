@@ -16,8 +16,9 @@ const definitions = [
 
 test('patch-agnostic taxonomy derives stable families from structural metadata', () => {
   const taxonomy = buildItemTaxonomy(definitions);
-  assert.equal(ITEM_TAXONOMY_VERSION, 1);
+  assert.equal(ITEM_TAXONOMY_VERSION, 2);
   assert.equal(taxonomy.get('BaseSword').type, 'component');
+  assert.equal(taxonomy.get('BaseSword').analyticsClass, 'excluded');
   assert.equal(taxonomy.get('RegularBlade').type, 'regular');
   assert.equal(taxonomy.get('FutureSet_EmblemItem').type, 'emblem');
   assert.equal(taxonomy.get('Future_Item_RadiantBlade').type, 'radiant');
@@ -37,6 +38,7 @@ test('unknown future items are quarantined instead of silently becoming regular'
 test('analytics eligibility uses metadata and has a generic legacy fallback', () => {
   const metadata = Object.fromEntries([...buildItemTaxonomy(definitions)].map(([id, value]) => [id, value]));
   assert.equal(isAnalyticItem('RegularBlade', metadata), true);
+  assert.equal(isAnalyticItem('BaseSword', metadata), false);
   assert.equal(isAnalyticItem('TFT99_Mechanic_Tier2_Blade', metadata), false);
   assert.equal(isAnalyticItem('TFT_Item_EmptyBag', metadata), false);
   assert.equal(isAnalyticItem('TFT88_Anything_Tier3_Upgrade'), false);

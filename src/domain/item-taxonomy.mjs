@@ -1,4 +1,4 @@
-export const ITEM_TAXONOMY_VERSION = 1;
+export const ITEM_TAXONOMY_VERSION = 2;
 export const ITEM_TYPES = Object.freeze(['regular', 'component', 'emblem', 'radiant', 'artifact', 'support', 'set_mechanic', 'unknown']);
 
 const joined = (...values) => values.filter(Boolean).join(' ');
@@ -27,7 +27,7 @@ export function classifyItemDefinition(definition = {}, compositionIngredients =
   if (/(?:RadiantItem|Item_[^ ]*Radiant\b|\bRadiant\s)/i.test(combined)) return classification('radiant', null, 'contextual', ['radiant-family']);
   if (/(?:Artifact|_Ornn|Ornn_Items|Shimmerscale)/i.test(combined)) return classification('artifact', null, 'contextual', ['artifact-family']);
   if (/(?:Support|Support_Items)/i.test(combined)) return classification('support', null, 'contextual', ['support-family']);
-  if (compositionIngredients.has(id) && composition.length === 0) return classification('component', null, 'comparable', ['recipe-ingredient']);
+  if (compositionIngredients.has(id) && composition.length === 0) return classification('component', null, 'excluded', ['recipe-ingredient', 'loose-component']);
   if (composition.length > 0) return classification('regular', null, 'comparable', ['recipe-output']);
 
   if (/^TFT\d+(?:_Set\d+)?_/i.test(id)) {

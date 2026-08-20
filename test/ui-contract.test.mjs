@@ -23,7 +23,7 @@ test('composition remediation is inline and augment navigation is removed', asyn
 
 test('home card renders the complete item-free flagship before the three-slot CORE', async () => {
   const app = await readFile(join(root, 'public', 'app.js'), 'utf8');
-  const homeStart = app.indexOf('function home(');
+  const homeStart = app.indexOf('function compositionCard(');
   const homeEnd = app.indexOf('function settings(', homeStart);
   const home = app.slice(homeStart, homeEnd);
   assert.match(home, /flagship\?\.champions \|\| \[\]\)\.map/);
@@ -37,7 +37,7 @@ test('home card renders the complete item-free flagship before the three-slot CO
 
 test('expanded composition shows champion analysis before flagship-relative variants', async () => {
   const app = await readFile(join(root, 'public', 'app.js'), 'utf8');
-  assert.match(app, /return champions \+ variants/);
+  assert.match(app, /return progressionPath\(entity\) \+ champions \+ variants/);
   assert.match(app, /data-composition-champion/);
   assert.match(app, /openCompositionChampion/);
   assert.match(app, /Todos los objetos dentro de la composición/);
@@ -49,7 +49,7 @@ test('expanded composition shows champion analysis before flagship-relative vari
 
 test('flagship card exposes Copy Team below its score without exposing flagship items', async () => {
   const app = await readFile(join(root, 'public', 'app.js'), 'utf8');
-  const home = app.slice(app.indexOf('function home('), app.indexOf('function settings('));
+  const home = app.slice(app.indexOf('function compositionCard('), app.indexOf('function settings('));
   assert.match(home, /score-stack/);
   assert.match(home, /teamCodeButton\(flagship\?\.champions \|\| \[\]\)/);
   assert.match(home, /flagshipBoard.*hideItems: true/);
@@ -130,10 +130,47 @@ test('item filters are shared by item, meta, champion, synergy, and interaction 
     readFile(join(root, 'public', 'app.css'), 'utf8')
   ]);
   assert.match(app, /ITEM_FILTER_TYPES/);
+  assert.doesNotMatch(app.match(/const ITEM_FILTER_TYPES = \[[^\n]+/)?.[0] || '', /component/);
+  assert.match(app, /function availableItemTypes/);
+  assert.match(app, /if \(!available\.length\) return ''/);
   assert.match(app, /data-item-type/);
   assert.match(app, /filteredItemEntries\(entry\.counterItems, 'itemId'\)/);
   assert.match(app, /filteredItemEntries\(champion\.items\)/);
-  assert.match(css, /\.item-type-filter\{/);
+  assert.match(css, /\.item-type-filter,\.synergy-filter\{/);
+});
+
+test('expanded archetypes disclose the deterministic modeled level path without claiming round history', async () => {
+  const [app, css] = await Promise.all([
+    readFile(join(root, 'public', 'app.js'), 'utf8'),
+    readFile(join(root, 'public', 'app.css'), 'utf8')
+  ]);
+  assert.match(app, /function progressionPath/);
+  assert.match(app, /Ruta de niveles · modelo determinista/);
+  assert.match(app, /No es un historial por ronda/);
+  assert.match(app, /progression\.stages\.map/);
+  assert.match(css, /\.progression-grid\{/);
+  assert.match(css, /\.progression-unit\.core/);
+});
+
+test('meta layout selector persists Standard or Compact while Compact keeps every card metric', async () => {
+  const [html, app, css, store] = await Promise.all([
+    readFile(join(root, 'public', 'index.html'), 'utf8'),
+    readFile(join(root, 'public', 'app.js'), 'utf8'),
+    readFile(join(root, 'public', 'app.css'), 'utf8'),
+    readFile(join(root, 'src', 'persistence', 'store.mjs'), 'utf8')
+  ]);
+  assert.match(html, /id="layout-selector"/);
+  assert.match(html, /value="standard"/);
+  assert.match(html, /value="compact"/);
+  assert.match(app, /JSON\.stringify\(\{ layout: event\.target\.value \}\)/);
+  assert.match(app, /layout-\$\{layout\(\)\}/);
+  assert.match(app, /compact-core/);
+  assert.match(app, /summary-metrics/);
+  assert.match(app, /placementDistribution\(item\)/);
+  assert.match(app, /teamCodeButton\(flagship\?\.champions \|\| \[\]\)/);
+  assert.match(css, /\.composition-list\.layout-compact/);
+  assert.match(css, /\.core-tag\{/);
+  assert.match(store, /layout: 'standard'/);
 });
 
 test('portable export stages the same pack for the automatic release-data pipeline', async () => {
@@ -197,4 +234,43 @@ test('0.6 package keeps only supported Electron languages and loads independent 
   assert.ok(!packageJson.build.files.includes('seed/**/*'));
   assert.match(app, /Promise\.all\(\[api\('\/api\/bootstrap'\), api\('\/api\/snapshots'\)\]\)/);
   assert.match(app, /Promise\.all\(\[api\(`\/api\/analysis/);
+});
+
+test('Meta synergy filters are data-derived, deterministic, and card-scoped', async () => {
+  const [app, css] = await Promise.all([
+    readFile(join(root, 'public', 'app.js'), 'utf8'),
+    readFile(join(root, 'public', 'app.css'), 'utf8')
+  ]);
+  assert.match(app, /new Set\(\(state\.analysis\?\.result\?\.compositions \|\| \[\]\)\.flatMap/);
+  assert.match(app, /\.sort\(\(left, right\) => metadata\('synergies', left\)\.name\.localeCompare/);
+  assert.match(app, /function compositionAllowed\(composition\) \{ return compositionParts\(composition\)\.every/);
+  assert.match(app, /result\.compositions\.filter\(compositionAllowed\)/);
+  assert.match(app, /data-synergy-id=/);
+  assert.match(app, /state\.disabledSynergies\.add\(synergyId\)/);
+  assert.match(app, /data-synergies=/);
+  assert.match(app, /matchingCompositions\.length === result\.compositions\.length/);
+  assert.match(css, /\.synergy-filter/);
+  assert.match(css, /\.synergy-filter-icon/);
+});
+
+test('archetypes and exact variants persist into a local Favorites meta tab', async () => {
+  const [html, app, css, store, server] = await Promise.all([
+    readFile(join(root, 'public', 'index.html'), 'utf8'),
+    readFile(join(root, 'public', 'app.js'), 'utf8'),
+    readFile(join(root, 'public', 'app.css'), 'utf8'),
+    readFile(join(root, 'src', 'persistence', 'store.mjs'), 'utf8'),
+    readFile(join(root, 'src', 'server.mjs'), 'utf8')
+  ]);
+  assert.match(html, /data-tab="favorites"/);
+  assert.match(app, /function favoriteIdentity/);
+  assert.match(app, /favoriteButton\('archetype', item\.id\)/);
+  assert.match(app, /favoriteButton\('variant', entity\.id, variant\.champions/);
+  assert.match(app, /function favoritesView/);
+  assert.match(app, /favorite-variant-card/);
+  assert.match(app, /remains saved locally/);
+  assert.match(app, /api\('\/api\/favorites'/);
+  assert.match(css, /\.favorite-toggle\.active/);
+  assert.match(store, /async setFavorite/);
+  assert.match(store, /championIds.*\.sort/);
+  assert.match(server, /request\.url === '\/api\/favorites'/);
 });
