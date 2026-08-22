@@ -36,7 +36,7 @@ The owner can select **Settings → Export data** and distribute the generated `
 
 See [docs/ANALYTICS.md](docs/ANALYTICS.md) for composition dominance, prevalence, score, and snapshot-sufficiency methods.
 
-The bundled 0.6.11 baseline contains 24,000 ranked observations: 4,000 each from EUW, NA, KR, BR, LAN, and LAS. Challenger and Grandmaster evidence is collected first; Master is used only for any remaining regional deficit, and tier/LP provenance is retained for audit.
+The bundled 0.6.12 baseline contains 24,000 ranked observations: 4,000 each from EUW, NA, KR, BR, LAN, and LAS. Challenger and Grandmaster evidence is collected first; Master is used only for any remaining regional deficit, and tier/LP provenance is retained for audit.
 
 Meta and Favorites share an All-first synergy dropdown, champion-name search covers displayed archetypes and variants, and Standard/Compact layouts preserve the same card evidence while Compact renders each collapsed composition as a materially shorter horizontal row. Every exact variant derives and displays its own three itemized CORE champions while remaining expressed as a flagship-relative add/remove diff. `[Emblema]` is additive: it appears when one dominant emblem has universal evidence, when a 30+ observation lineup has at least 95% evidence for that emblem, or whenever one of the three CORE champions visibly carries an emblem in its representative items. The archetype inherits the marker only from its most-played flagship.
 

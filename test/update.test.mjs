@@ -37,3 +37,32 @@ test('update download verifies byte count and SHA-256 before exposing an install
   assert.equal(downloads, 1);
   await assert.rejects(downloadVerifiedUpdate({ ...manifest, sha256: '0'.repeat(64) }, directory, { fetchImpl: async () => new Response(payload) }), /UPDATE_CHECKSUM_MISMATCH/);
 });
+
+test('update download retries alternative asset names before failing', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'tfttool-update-alt-'));
+  try {
+    const payload = Buffer.from('verified-installer');
+    const sha = createHash('sha256').update(payload).digest('hex');
+    const manifest = {
+      channel: 'stable',
+      version: '0.6.2',
+      installerUrl: 'https://github.com/Gabriel-Vasquez/TFTTool/releases/download/v0.6.2/TFTTool.Setup.0.6.2.exe',
+      size: payload.length,
+      sha256: sha,
+    };
+    const requested = [];
+    const fetchImpl = async (url) => {
+      requested.push(url);
+      if (url.includes('TFTTool.Setup.0.6.2.exe')) return new Response('not-used', { status: 404 });
+      if (url.includes('TFTTool%20Setup%200.6.2.exe')) return new Response(payload);
+      return new Response('unexpected', { status: 404 });
+    };
+
+    const target = await downloadVerifiedUpdate(manifest, directory, { fetchImpl });
+    assert.equal(await readFile(target), payload);
+    assert.ok(requested.length >= 2, 'it should retry with alternatives');
+    assert.equal(requested.some((entry) => entry.includes('TFTTool%20Setup%200.6.2.exe')), true);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

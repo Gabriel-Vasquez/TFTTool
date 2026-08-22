@@ -22,9 +22,44 @@ export function validateUpdateManifest(manifest) {
   if (!manifest || manifest.channel !== 'stable' || !/^\d+\.\d+\.\d+$/.test(manifest.version) || !/^[a-f0-9]{64}$/i.test(manifest.sha256) || !Number.isInteger(manifest.size) || manifest.size <= 0) throw new Error('UPDATE_MANIFEST_INVALID');
   let installer;
   try { installer = new URL(manifest.installerUrl); } catch { throw new Error('UPDATE_MANIFEST_INVALID'); }
-  const expectedPrefix = `/Gabriel-Vasquez/TFTTool/releases/download/v${manifest.version}/`;
-  if (installer.protocol !== 'https:' || installer.hostname !== 'github.com' || !installer.pathname.startsWith(expectedPrefix)) throw new Error('UPDATE_SOURCE_INVALID');
+  const expectedVersionPrefix = `/Gabriel-Vasquez/TFTTool/releases/download/v${manifest.version}/`;
+  const expectedLatestPrefix = '/Gabriel-Vasquez/TFTTool/releases/latest/download/';
+  if (
+    installer.protocol !== 'https:'
+    || installer.hostname !== 'github.com'
+    || !(installer.pathname.startsWith(expectedVersionPrefix) || installer.pathname.startsWith(expectedLatestPrefix))
+  ) {
+    throw new Error('UPDATE_SOURCE_INVALID');
+  }
   return { ...manifest, sha256: manifest.sha256.toLowerCase() };
+}
+
+function buildInstallerCandidates(manifest) {
+  const manifestUrl = new URL(manifest.installerUrl);
+  const pathParts = manifestUrl.pathname.split('/').filter(Boolean);
+  const baseName = decodeURIComponent(pathParts.at(-1) || `TFTTool Setup ${manifest.version}.exe`);
+  const directory = `/${pathParts.slice(0, -1).join('/')}/`;
+  const candidates = new Set([manifestUrl.href]);
+
+  const candidateNames = new Set([
+    baseName,
+    `TFTTool Setup ${manifest.version}.exe`,
+    `TFTTool.Setup.${manifest.version}.exe`,
+  ]);
+
+  const pushFor = (prefix) => {
+    for (const fileName of candidateNames.values()) {
+      const url = new URL(manifestUrl);
+      url.pathname = `${prefix}${encodeURIComponent(fileName)}`;
+      candidates.add(url.href);
+    }
+  };
+
+  pushFor(`/Gabriel-Vasquez/TFTTool/releases/download/v${manifest.version}/`);
+  pushFor('/Gabriel-Vasquez/TFTTool/releases/latest/download/');
+  pushFor(directory);
+
+  return [...candidates];
 }
 
 export async function checkForUpdate({ currentVersion, fetchImpl = fetch, manifestUrl = UPDATE_MANIFEST_URL } = {}) {
@@ -49,19 +84,27 @@ export async function downloadVerifiedUpdate(manifestValue, directory, { fetchIm
     if ((await stat(target)).size === manifest.size && await fileSha256(target) === manifest.sha256) { onProgress(manifest.size, manifest.size); return target; }
   } catch (error) { if (error.code !== 'ENOENT') await rm(target, { force: true }); }
   await rm(temporary, { force: true });
-  const response = await fetchImpl(manifest.installerUrl, { headers: { accept: 'application/octet-stream', 'user-agent': `TFTTool/${manifest.version}` }, redirect: 'follow' });
-  if (!response.ok || !response.body) throw new Error(`UPDATE_DOWNLOAD_HTTP_${response.status}`);
-  let downloadedBytes = 0;
-  const progress = new Transform({ transform(chunk, encoding, callback) { downloadedBytes += chunk.length; onProgress(downloadedBytes, manifest.size); callback(null, chunk); } });
-  try {
-    await pipeline(Readable.fromWeb(response.body), progress, createWriteStream(temporary, { flags: 'wx' }));
-    if (downloadedBytes !== manifest.size) throw new Error('UPDATE_SIZE_MISMATCH');
-    if (await fileSha256(temporary) !== manifest.sha256) throw new Error('UPDATE_CHECKSUM_MISMATCH');
-    await rm(target, { force: true });
-    await rename(temporary, target);
-    return target;
-  } catch (error) {
-    await rm(temporary, { force: true });
-    throw error;
+  const candidates = buildInstallerCandidates(manifest);
+  const headers = { accept: 'application/octet-stream', 'user-agent': `TFTTool/${manifest.version}` };
+  let lastStatus;
+
+  for (const candidate of candidates) {
+    const response = await fetchImpl(candidate, { headers, redirect: 'follow' });
+    if (!response.ok || !response.body) { lastStatus = response.status; continue; }
+    let downloadedBytes = 0;
+    const progress = new Transform({ transform(chunk, encoding, callback) { downloadedBytes += chunk.length; onProgress(downloadedBytes, manifest.size); callback(null, chunk); } });
+    try {
+      await pipeline(Readable.fromWeb(response.body), progress, createWriteStream(temporary, { flags: 'wx' }));
+      if (downloadedBytes !== manifest.size) throw new Error('UPDATE_SIZE_MISMATCH');
+      if (await fileSha256(temporary) !== manifest.sha256) throw new Error('UPDATE_CHECKSUM_MISMATCH');
+      await rm(target, { force: true });
+      await rename(temporary, target);
+      return target;
+    } catch (error) {
+      await rm(temporary, { force: true });
+      throw error;
+    }
   }
+
+  throw new Error(`UPDATE_DOWNLOAD_HTTP_${lastStatus || 404}`);
 }
