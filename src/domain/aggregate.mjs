@@ -1,5 +1,6 @@
 import { ANALYSIS_VERSION, activeTraits, clusterCompositions, lineupIdentity } from './composition.mjs';
 import { analyzeInteractions } from './interactions.mjs';
+import { unitCost } from './normalization.mjs';
 import { isAnalyticItem, isEmblemItem } from './item-taxonomy.mjs';
 import { scoreByPrevalenceAndPlacement } from './score.mjs';
 
@@ -68,9 +69,7 @@ export function championDetails(observations, itemMetadata = {}) {
       champion.itemTotal += analyticItems.length;
       champion.observations.push(observation);
       increment(champion.stars, unit.tier);
-      const observedCost = Number.isFinite(Number(unit.rarity)) && Number(unit.rarity) >= 0 && Number(unit.rarity) <= 9
-        ? Number(unit.rarity) + 1
-        : Number.isFinite(Number(unit.cost)) && Number(unit.cost) >= 1 && Number(unit.cost) <= 5 ? Number(unit.cost) : null;
+      const observedCost = unitCost(unit);
       if (observedCost) increment(champion.costs, observedCost);
       new Set(analyticItems).forEach((item) => {
         increment(champion.items, item);

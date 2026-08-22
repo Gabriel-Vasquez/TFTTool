@@ -87,8 +87,8 @@ function icon(type, id, className = 'entity-icon', detail = '') { const meta = m
 function championCost(champion) {
   const direct = Number(champion.cost);
   if (direct >= 1 && direct <= 10) return direct;
-  const rarity = Number(champion.rarity);
-  if (rarity >= 0 && rarity <= 9) return rarity + 1;
+  const rarityCost = new Map([[0, 1], [1, 2], [2, 3], [4, 4], [6, 5]]).get(Number(champion.rarity));
+  if (rarityCost) return rarityCost;
   const fallback = Number(metadata('champions', champion.id).cost);
   return fallback >= 1 && fallback <= 10 ? fallback : null;
 }

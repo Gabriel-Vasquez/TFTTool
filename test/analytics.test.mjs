@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { aggregate, championDetails, deriveTraitBreakpoints } from '../src/domain/aggregate.mjs';
 import { analyzeCurrentSet } from '../src/domain/analysis.mjs';
 import { activeTraits, clusterCompositions } from '../src/domain/composition.mjs';
-import { normalizeParticipant } from '../src/domain/normalization.mjs';
+import { costFromRarity, normalizeParticipant, unitCost } from '../src/domain/normalization.mjs';
 import { scoreByPrevalenceAndPlacement } from '../src/domain/score.mjs';
 import { assessSufficiency } from '../src/domain/stability.mjs';
 import { compareSnapshots } from '../src/domain/history.mjs';
@@ -11,6 +11,13 @@ import { compareSnapshots } from '../src/domain/history.mjs';
 const unit = (id, items = [], tier = 2, rarity = 2) => ({ id, name: id, tier, rarity, cost: 0, items });
 const observation = (id, placement, units, traits = [{ id: 'TraitA', name: 'Trait A', tier: 1, units: 2, style: 1 }], region = 'EUW') => ({
   id, region, placement, units, traits, augments: ['StoredButNotAggregated']
+});
+
+test('Riot unit rarity maps to patch-agnostic one-to-five champion costs', () => {
+  assert.deepEqual([0, 1, 2, 4, 6].map(costFromRarity), [1, 2, 3, 4, 5]);
+  assert.equal(unitCost({ rarity: 4, cost: 0 }), 4);
+  assert.equal(unitCost({ rarity: 6, cost: 0 }), 5);
+  assert.equal(unitCost({ rarity: 99, cost: 5 }), 5);
 });
 
 function archetypeSamples(prefix, count, itemId, placement = 4) {

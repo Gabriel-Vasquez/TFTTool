@@ -57,7 +57,7 @@ while (Date.now() < deadline) {
 
 if (!state?.title?.startsWith('TFTTool') || state.cards < 1 || !/Meta actual|Current meta/.test(state.text)) throw new Error(`Unexpected standalone window state: ${JSON.stringify(state)}`);
 if (!/^24[.,]000$/.test(state.observations) || state.oneStars < 1 || state.twoStars < 1 || state.threeStars < 1 || state.oneStarStyle.opacity !== '0.62' || state.twoStarStyle.color !== 'rgb(255, 255, 255)' || state.twoStarStyle.opacity !== '1') throw new Error(`Expected canonical observations and differentiated star badges: ${JSON.stringify(state)}`);
-const expectedCostBorders = { 1: 'rgb(124, 135, 152)', 2: 'rgb(57, 185, 111)', 3: 'rgb(67, 137, 223)', 4: 'rgb(164, 91, 224)', 5: 'rgb(164, 91, 224)' };
+const expectedCostBorders = { 1: 'rgb(124, 135, 152)', 2: 'rgb(57, 185, 111)', 3: 'rgb(67, 137, 223)', 4: 'rgb(164, 91, 224)', 5: 'rgb(245, 196, 81)' };
 const presentCostsAreCorrect = Object.entries(expectedCostBorders).every(([cost, color]) => !state.costBorders[cost]?.count || state.costBorders[cost].color === color);
 const presentCostsAreAccented = Object.values(state.costBorders).every((entry) => !entry.count || entry.width === '3px' && entry.outline === '1px');
 const requiredCostsArePresent = [1, 2, 3].every((cost) => state.costBorders[cost]?.count > 0) && [4, 5].some((cost) => state.costBorders[cost]?.count > 0);
