@@ -12,9 +12,9 @@ All development and testing must run in the repository-owned isolated QA sandbox
 
 The first owner-facing in-place update must include the complete, freshly validated six-region real-data snapshot collected during QA so the product is ready for immediate use without another same-day refresh. Never discard that retrieved dataset. Import it only when newer than the owner's latest local snapshot, while preserving every existing historical snapshot, setting, and encrypted Riot key.
 
-- Phase: TFTTool 0.6.13 corrects Riot rarity-to-cost presentation and is ready for public release after isolated QA.
+- Phase: TFTTool 0.6.13 is published on public `main` with tag `v0.6.13` and a verified GitHub release asset; cost-4/cost-5 presentation is corrected.
 - Branch: `main`.
-- Published release: TFTTool `0.6.12` remains available on public `main` with tag `v0.6.12`; the 0.6.13 update pointer is prepared for its matching release asset.
+- Published release: TFTTool `0.6.13` is available on public `main` with tag `v0.6.13`; `updates/stable.json` points to the exact uploaded `TFTTool.Setup.0.6.13.exe` asset.
 - GitHub: public `Gabriel-Vasquez/TFTTool`.
 - Implemented and installed: official multi-region Riot ingestion, protected local key storage and invalid-key replacement, full baseline plus incremental diff refresh, deterministic current-set archetypes, real trait breakpoints, exact prevalence/raw-placement weighting, TFTactics-style champion/item presentation, flagship-relative variant diffs, Team Planner export codes, shared-lobby matchup and opponent-conditioned Counter Item analytics, evidence drill-downs, snapshot history/trends, portable `.tftpack` transfer, complete EN/ES UX, bounded rendering/search, secured standalone Electron window, local shutdown control, compressed bundled snapshot import, and NSIS in-place updating.
 - Owner-data baseline: TFTTool 0.6.1 is installed at `C:\Program Files\TFTTool`. The data directory, encrypted key availability, Spanish preference, snapshot identity, history, and all 12,000 observations remain preserved after the in-place migration.
