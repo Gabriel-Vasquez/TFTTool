@@ -324,7 +324,8 @@ test('champion cost borders, brilliant CORE treatment, and item components are v
   assert.match(css, /\.champion-tile\.cost-1/);
   assert.match(css, /\.champion-tile\.cost-2/);
   assert.match(css, /\.champion-tile\.cost-3/);
-  assert.match(css, /\.champion-tile\.cost-4 \.champion-portrait,\.champion-tile\.cost-5/);
+  assert.match(css, /\.champion-tile\.cost-4 \.champion-portrait/);
+  assert.match(css, /\.champion-tile\.cost-5 \.champion-portrait/);
   assert.match(css, /\.highlighted-core \.champion-portrait/);
   assert.match(css, /border-width:3px;outline:1px solid currentColor/);
   assert.match(app, /function itemComponentsView/);

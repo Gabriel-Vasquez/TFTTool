@@ -59,7 +59,7 @@ test('update download retries alternative asset names before failing', async () 
     };
 
     const target = await downloadVerifiedUpdate(manifest, directory, { fetchImpl });
-    assert.equal(await readFile(target), payload);
+    assert.deepEqual(await readFile(target), payload);
     assert.ok(requested.length >= 2, 'it should retry with alternatives');
     assert.equal(requested.some((entry) => entry.includes('TFTTool%20Setup%200.6.2.exe')), true);
   } finally {
