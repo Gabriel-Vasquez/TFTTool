@@ -12,9 +12,9 @@ All development and testing must run in the repository-owned isolated QA sandbox
 
 The first owner-facing in-place update must include the complete, freshly validated six-region real-data snapshot collected during QA so the product is ready for immediate use without another same-day refresh. Never discard that retrieved dataset. Import it only when newer than the owner's latest local snapshot, while preserving every existing historical snapshot, setting, and encrypted Riot key.
 
-- Phase: TFTTool 0.6.10 is the published and updater-verified production-BETA version.
+- Phase: TFTTool 0.6.11 is the published and updater-verified production-BETA version.
 - Branch: `main`.
-- Published release: TFTTool `0.6.10` on public `main`, with installer asset tag `v0.6.10` and `updates/stable.json` as the controlled stable channel.
+- Published release: TFTTool `0.6.11` on public `main`, with installer asset tag `v0.6.11` and `updates/stable.json` as the controlled stable channel.
 - GitHub: public `Gabriel-Vasquez/TFTTool`.
 - Implemented and installed: official multi-region Riot ingestion, protected local key storage and invalid-key replacement, full baseline plus incremental diff refresh, deterministic current-set archetypes, real trait breakpoints, exact prevalence/raw-placement weighting, TFTactics-style champion/item presentation, flagship-relative variant diffs, Team Planner export codes, shared-lobby matchup and opponent-conditioned Counter Item analytics, evidence drill-downs, snapshot history/trends, portable `.tftpack` transfer, complete EN/ES UX, bounded rendering/search, secured standalone Electron window, local shutdown control, compressed bundled snapshot import, and NSIS in-place updating.
 - Owner-data baseline: TFTTool 0.6.1 is installed at `C:\Program Files\TFTTool`. The data directory, encrypted key availability, Spanish preference, snapshot identity, history, and all 12,000 observations remain preserved after the in-place migration.
