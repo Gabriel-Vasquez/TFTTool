@@ -2,24 +2,38 @@ const { app, BrowserWindow, dialog } = require('electron');
 const { join } = require('node:path');
 const { pathToFileURL } = require('node:url');
 const net = require('node:net');
-const { copyFileSync, mkdirSync } = require('node:fs');
+const { copyFileSync, mkdirSync, rmSync } = require('node:fs');
+const { readFile } = require('node:fs/promises');
 const { spawn } = require('node:child_process');
+const { buildEncodedHelperCommand } = require('./update-launcher.cjs');
 
 const preferredPort = Number(process.env.TFTTOOL_PORT) || 18473;
 let service;
 let serviceUrl;
 let mainWindow;
 
-const powershellQuote = (value) => `'${String(value).replace(/'/g, "''")}'`;
-
 function startElevatedRelauncher({ relauncher, installer, application, parentProcessId, statusFile }) {
-  const argumentsList = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', relauncher, '-Installer', installer, '-Application', application, '-ParentProcessId', String(parentProcessId), '-StatusFile', statusFile];
-  const command = `$argumentsList = @(${argumentsList.map(powershellQuote).join(', ')}); Start-Process -FilePath 'powershell.exe' -ArgumentList $argumentsList -Verb RunAs -ErrorAction Stop | Out-Null`;
+  const encodedCommand = buildEncodedHelperCommand({ relauncher, installer, application, parentProcessId, statusFile });
+  const command = `$argumentsList = @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand','${encodedCommand}'); Start-Process -FilePath 'powershell.exe' -ArgumentList $argumentsList -Verb RunAs -ErrorAction Stop | Out-Null`;
   return new Promise((resolve, reject) => {
     const broker = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { windowsHide: true });
     broker.once('error', reject);
     broker.once('exit', (code) => code === 0 ? resolve() : reject(new Error(`UPDATE_ELEVATION_FAILED_${code ?? 'UNKNOWN'}`)));
   });
+}
+
+async function waitForUpdaterReady(statusFile, attempts = 50) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const status = JSON.parse(await readFile(statusFile, 'utf8'));
+      if (['ready', 'installing', 'relaunching', 'completed'].includes(status.state)) return;
+      if (status.state === 'failed') throw new Error(`UPDATE_HELPER_FAILED_${status.detail || 'UNKNOWN'}`);
+    } catch (error) {
+      if (!['ENOENT', 'Unexpected end of JSON input'].includes(error.code || error.message)) throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error('UPDATE_HELPER_NOT_READY');
 }
 
 function stageRelauncher(updateDirectory) {
@@ -64,7 +78,10 @@ async function launch() {
     onInstallUpdate: async (installer) => {
       const updateDirectory = join(process.env.TFTTOOL_DATA_DIR || join(process.env.LOCALAPPDATA || app.getPath('userData'), 'TFTTool'), 'updates');
       const relauncher = stageRelauncher(updateDirectory);
-      await startElevatedRelauncher({ relauncher, installer, application: process.execPath, parentProcessId: process.pid, statusFile: join(updateDirectory, 'install-status.json') });
+      const statusFile = join(updateDirectory, 'install-status.json');
+      rmSync(statusFile, { force: true });
+      await startElevatedRelauncher({ relauncher, installer, application: process.execPath, parentProcessId: process.pid, statusFile });
+      await waitForUpdaterReady(statusFile);
       setTimeout(() => app.quit(), 250);
     }
   });

@@ -13,6 +13,8 @@ function Save-UpdateStatus([string]$state, [string]$detail = '') {
   @{ state = $state; detail = $detail; updatedAt = [DateTime]::UtcNow.ToString('o') } | ConvertTo-Json -Compress | Set-Content -Path $StatusFile -Encoding UTF8
 }
 
+Save-UpdateStatus 'ready'
+
 try {
   $parent = Get-Process -Id $ParentProcessId -ErrorAction Stop
   $parent.WaitForExit()
@@ -24,7 +26,8 @@ try {
   $installationDirectory = Split-Path -Parent $Application
   $applicationName = Split-Path -Leaf $Application
   Save-UpdateStatus 'installing'
-  $installation = Start-Process -FilePath $Installer -ArgumentList @('/S', "/D=$installationDirectory") -Wait -PassThru
+  $installerArguments = "/S `"/D=$installationDirectory`""
+  $installation = Start-Process -FilePath $Installer -ArgumentList $installerArguments -Wait -PassThru
   if ($installation.ExitCode -ne 0) { throw "INSTALLER_EXIT_$($installation.ExitCode)" }
   $installedApplication = Join-Path $installationDirectory $applicationName
   if (-not (Test-Path $installedApplication)) { throw 'INSTALLED_APPLICATION_MISSING' }

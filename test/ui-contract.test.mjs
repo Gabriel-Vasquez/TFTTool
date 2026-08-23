@@ -168,11 +168,12 @@ test('portable data controls export and atomically import one tftpack without a 
 });
 
 test('settings opens as a floating dialog with a verified application updater', async () => {
-  const [html, app, css, launcher, packageJson, relauncher] = await Promise.all([
+  const [html, app, css, launcher, updateLauncher, packageJson, relauncher] = await Promise.all([
     readFile(join(root, 'public', 'index.html'), 'utf8'),
     readFile(join(root, 'public', 'app.js'), 'utf8'),
     readFile(join(root, 'public', 'app.css'), 'utf8'),
     readFile(join(root, 'electron', 'main.cjs'), 'utf8'),
+    readFile(join(root, 'electron', 'update-launcher.cjs'), 'utf8'),
     readFile(join(root, 'package.json'), 'utf8'),
     readFile(join(root, 'src', 'update-and-relaunch.ps1'), 'utf8')
   ]);
@@ -185,14 +186,18 @@ test('settings opens as a floating dialog with a verified application updater', 
   assert.match(css, /\.sidebar \{ position:fixed;z-index:30;left:0;top:0;bottom:0;[^}]*height:100vh;overflow:hidden/);
   assert.match(css, /\.sidebar-bottom \{ flex:0 0 auto;margin-top:auto/);
   assert.match(launcher, /update-and-relaunch\.ps1/);
-  assert.match(launcher, /'-ParentProcessId', String\(parentProcessId\)/);
+  assert.match(updateLauncher, /-ParentProcessId \$\{parentProcessId\}/);
   assert.match(launcher, /spawn\('powershell\.exe'/);
   assert.match(launcher, /function stageRelauncher/);
   assert.match(launcher, /copyFileSync\(source, relauncher\)/);
   assert.doesNotMatch(launcher, /app\.asar\.unpacked/);
+  assert.match(launcher, /-EncodedCommand/);
+  assert.match(launcher, /waitForUpdaterReady\(statusFile\)/);
   assert.equal(JSON.parse(packageJson).build.nsis.perMachine, true);
   assert.match(launcher, /-Verb RunAs/);
-  assert.match(relauncher, /"\/D=\$installationDirectory"/);
+  assert.match(relauncher, /installerArguments = .*\/D=\$installationDirectory/);
+  assert.match(relauncher, /Start-Process -FilePath \$Installer -ArgumentList \$installerArguments/);
+  assert.match(relauncher, /Save-UpdateStatus 'ready'/);
   assert.match(launcher, /install-status\.json/);
   assert.match(relauncher, /\[string\]\$StatusFile/);
 });
