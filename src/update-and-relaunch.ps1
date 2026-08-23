@@ -10,7 +10,9 @@ $statusDirectory = Split-Path -Parent $StatusFile
 
 function Save-UpdateStatus([string]$state, [string]$detail = '') {
   New-Item -ItemType Directory -Path $statusDirectory -Force | Out-Null
-  @{ state = $state; detail = $detail; updatedAt = [DateTime]::UtcNow.ToString('o') } | ConvertTo-Json -Compress | Set-Content -Path $StatusFile -Encoding UTF8
+  $json = @{ state = $state; detail = $detail; updatedAt = [DateTime]::UtcNow.ToString('o') } | ConvertTo-Json -Compress
+  $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($StatusFile, $json, $utf8WithoutBom)
 }
 
 Save-UpdateStatus 'ready'

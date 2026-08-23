@@ -5,4 +5,8 @@ function buildEncodedHelperCommand({ relauncher, installer, application, parentP
   return Buffer.from(helperCommand, 'utf16le').toString('base64');
 }
 
-module.exports = { buildEncodedHelperCommand };
+function parseUpdaterStatus(contents) {
+  return JSON.parse(String(contents).replace(/^\uFEFF/, ''));
+}
+
+module.exports = { buildEncodedHelperCommand, parseUpdaterStatus };

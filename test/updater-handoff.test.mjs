@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { buildEncodedHelperCommand } = require('../electron/update-launcher.cjs');
+const { buildEncodedHelperCommand, parseUpdaterStatus } = require('../electron/update-launcher.cjs');
 const root = join(import.meta.dirname, '..');
 
 test('elevated updater handoff preserves every path containing spaces', async (t) => {
@@ -30,7 +30,9 @@ test('elevated updater handoff preserves every path containing spaces', async (t
   ], { encoding: 'utf8', windowsHide: true });
 
   assert.equal(result.status, 0, result.stderr);
-  const recorded = JSON.parse((await readFile(statusFile, 'utf8')).replace(/^\uFEFF/, ''));
+  const rawStatus = await readFile(statusFile, 'utf8');
+  assert.equal(rawStatus.charCodeAt(0), 0xFEFF, 'fixture must reproduce the Windows PowerShell UTF-8 BOM');
+  const recorded = parseUpdaterStatus(rawStatus);
   assert.deepEqual(recorded, { installer, application, parentProcessId, statusFile });
 });
 

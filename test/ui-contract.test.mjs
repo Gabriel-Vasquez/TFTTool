@@ -193,11 +193,13 @@ test('settings opens as a floating dialog with a verified application updater', 
   assert.doesNotMatch(launcher, /app\.asar\.unpacked/);
   assert.match(launcher, /-EncodedCommand/);
   assert.match(launcher, /waitForUpdaterReady\(statusFile\)/);
+  assert.match(launcher, /parseUpdaterStatus\(await readFile\(statusFile, 'utf8'\)\)/);
   assert.equal(JSON.parse(packageJson).build.nsis.perMachine, true);
   assert.match(launcher, /-Verb RunAs/);
   assert.match(relauncher, /installerArguments = .*\/D=\$installationDirectory/);
   assert.match(relauncher, /Start-Process -FilePath \$Installer -ArgumentList \$installerArguments/);
   assert.match(relauncher, /Save-UpdateStatus 'ready'/);
+  assert.match(relauncher, /UTF8Encoding\(\$false\)/);
   assert.match(launcher, /install-status\.json/);
   assert.match(relauncher, /\[string\]\$StatusFile/);
 });

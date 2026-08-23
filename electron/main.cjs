@@ -5,7 +5,7 @@ const net = require('node:net');
 const { copyFileSync, mkdirSync, rmSync } = require('node:fs');
 const { readFile } = require('node:fs/promises');
 const { spawn } = require('node:child_process');
-const { buildEncodedHelperCommand } = require('./update-launcher.cjs');
+const { buildEncodedHelperCommand, parseUpdaterStatus } = require('./update-launcher.cjs');
 
 const preferredPort = Number(process.env.TFTTOOL_PORT) || 18473;
 let service;
@@ -25,7 +25,7 @@ function startElevatedRelauncher({ relauncher, installer, application, parentPro
 async function waitForUpdaterReady(statusFile, attempts = 50) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      const status = JSON.parse(await readFile(statusFile, 'utf8'));
+      const status = parseUpdaterStatus(await readFile(statusFile, 'utf8'));
       if (['ready', 'installing', 'relaunching', 'completed'].includes(status.state)) return;
       if (status.state === 'failed') throw new Error(`UPDATE_HELPER_FAILED_${status.detail || 'UNKNOWN'}`);
     } catch (error) {
