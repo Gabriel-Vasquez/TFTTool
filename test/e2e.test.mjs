@@ -53,7 +53,7 @@ test('isolated service serves health, bootstrap, UI, and icon end to end', async
   const { url } = await startIsolatedServer(t);
   assert.deepEqual(await (await fetch(`${url}/api/health`)).json(), { ok: true, service: 'tfttool' });
   const bootstrap = await (await fetch(`${url}/api/bootstrap`)).json();
-  assert.equal(bootstrap.appVersion, '0.6.17');
+  assert.equal(bootstrap.appVersion, '0.6.18');
   assert.equal(bootstrap.settings.language, 'es');
   assert.equal(bootstrap.settings.layout, 'standard');
   assert.deepEqual(bootstrap.favorites, []);
@@ -64,7 +64,7 @@ test('isolated service serves health, bootstrap, UI, and icon end to end', async
   assert.equal(refresh.newObservations, 0);
   assert.equal(refresh.progressPercent, 0);
   assert.equal(bootstrap.appUpdate.state, 'idle');
-  assert.equal((await (await fetch(`${url}/api/app-update`)).json()).currentVersion, '0.6.17');
+  assert.equal((await (await fetch(`${url}/api/app-update`)).json()).currentVersion, '0.6.18');
   const analysis = await (await fetch(`${url}/api/analysis`)).json();
   assert.equal(analysis.result.observations, 24_000);
   assert.equal(analysis.result.compositions.length, 25);
@@ -115,6 +115,27 @@ test('isolated settings flow persists language and layout and rejects malformed 
   const crossOrigin = await fetch(`${url}/api/refresh`, { method: 'POST', headers: { origin: 'https://malicious.example' } });
   assert.equal(crossOrigin.status, 403);
   assert.equal((await crossOrigin.json()).error, 'untrusted_origin');
+});
+
+test('isolated refresh cancellation acknowledges promptly and leaves the service usable', async (t) => {
+  const { url } = await startIsolatedServer(t);
+  const saved = await fetch(`${url}/api/settings/riot-key`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ key: 'RGAPI-isolated-test-key-not-a-real-secret' })
+  });
+  assert.equal(saved.status, 204);
+  assert.equal((await fetch(`${url}/api/refresh`, { method: 'POST' })).status, 202);
+  assert.equal((await fetch(`${url}/api/refresh/cancel`, { method: 'POST' })).status, 202);
+  let refresh;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    refresh = await (await fetch(`${url}/api/refresh`)).json();
+    if (refresh.state === 'cancelled') break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.equal(refresh.state, 'cancelled');
+  assert.equal(refresh.error, null);
+  assert.equal((await (await fetch(`${url}/api/health`)).json()).ok, true);
 });
 
 test('isolated teammate flow exports and stages portable data without a Riot key or refresh', async (t) => {

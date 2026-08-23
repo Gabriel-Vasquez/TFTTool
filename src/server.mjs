@@ -12,7 +12,7 @@ import { ITEM_TAXONOMY_VERSION } from './domain/item-taxonomy.mjs';
 import { LocalStore, hasCompleteRegionalCoverage } from './persistence/store.mjs';
 import { createDataPack, parseDataPack } from './persistence/data-pack.mjs';
 import { importBundledSnapshot } from './persistence/seed.mjs';
-import { RiotClient } from './riot/client.mjs';
+import { REFRESH_CANCELLED, RiotClient } from './riot/client.mjs';
 import { MetadataClient } from './riot/metadata.mjs';
 import { SecretStore } from './security/secrets.mjs';
 import { UPDATE_MANIFEST_URL, checkForUpdate, downloadVerifiedUpdate } from './update.mjs';
@@ -22,7 +22,8 @@ const store = new LocalStore(dataDirectory);
 const secrets = new SecretStore(dataDirectory);
 const metadata = new MetadataClient(fetch, { cacheDirectory: join(dataDirectory, 'metadata') });
 const analysisCache = new Map();
-const job = { state: 'idle', stage: 'idle', regions: {}, error: null, startedAt: null, targetPerRegion: REFRESH_TARGET_PER_REGION, newObservations: 0, progressPercent: 0 };
+const job = { state: 'idle', stage: 'idle', regions: {}, error: null, startedAt: null, targetPerRegion: REFRESH_TARGET_PER_REGION, newObservations: 0, progressPercent: 0, cancelRequested: false, checkpointDigest: null };
+let activeRefreshController = null;
 const json = (response, status, value) => { response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); response.end(JSON.stringify(value)); };
 const body = async (request) => { const chunks = []; for await (const chunk of request) chunks.push(chunk); return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}; };
 const binaryBody = async (request, maximum = 128 * 1024 * 1024) => { const chunks = []; let size = 0; for await (const chunk of request) { size += chunk.length; if (size > maximum) throw new Error('DATA_PACK_SIZE_INVALID'); chunks.push(chunk); } return Buffer.concat(chunks); };
@@ -57,12 +58,13 @@ async function analysisOptions(observations) {
   } catch { return {}; }
 }
 
-async function refresh() {
+async function refresh(controller) {
+  let checkpointForStorage = null;
   try {
     const apiKey = await secrets.getRiotApiKey();
     if (!apiKey) throw new Error('RIOT_API_KEY_REQUIRED');
-    job.state = 'running'; job.stage = 'collecting'; job.error = null; job.startedAt ||= new Date().toISOString(); job.regions = {}; job.targetPerRegion = REFRESH_TARGET_PER_REGION; job.newObservations = 0; job.progressPercent = 0;
-    const client = new RiotClient(apiKey, { onProgress: (progress) => {
+    job.state = 'running'; job.stage = 'collecting'; job.error = null; job.startedAt ||= new Date().toISOString(); job.regions = {}; job.targetPerRegion = REFRESH_TARGET_PER_REGION; job.newObservations = 0; job.progressPercent = 0; job.cancelRequested = false; job.checkpointDigest = null;
+    const client = new RiotClient(apiKey, { signal: controller.signal, onProgress: (progress) => {
       if (!progress.region) return;
       job.regions[progress.region] = { ...job.regions[progress.region], ...progress };
       const regionalProgress = Object.keys(REGIONS).map((region) => job.regions[region]);
@@ -100,16 +102,20 @@ async function refresh() {
       const observations = [...new Map([...baseline.observations, ...(saved.observations || [])].map((observation) => [observation.id, observation])).values()];
       return { ...baseline, ...saved, observations };
     };
+    const { digest: _savedCheckpointDigest, ...savedCheckpointState } = savedCheckpoint || {};
     const checkpoint = checkpointCompatible
-      ? { ...savedCheckpoint, regions: Object.fromEntries(Object.keys(REGIONS).map((region) => [region, hydrateCheckpointRegion(region)])) }
+      ? { ...savedCheckpointState, regions: Object.fromEntries(Object.keys(REGIONS).map((region) => [region, hydrateCheckpointRegion(region)])) }
       : { startedAt: job.startedAt, targetPerRegion: REFRESH_TARGET_PER_REGION, provenanceVersion: 5, regions: incrementalRegions };
-    const checkpointForStorage = () => ({
-      ...checkpoint,
-      regions: Object.fromEntries(Object.entries(checkpoint.regions).map(([region, state]) => [region, {
-        ...state,
-        observations: (state.observations || []).filter((observation) => !baselineObservationIds[region].has(observation.id))
-      }]))
-    });
+    checkpointForStorage = () => {
+      const { digest: _checkpointDigest, ...checkpointState } = checkpoint;
+      return {
+        ...checkpointState,
+        regions: Object.fromEntries(Object.entries(checkpoint.regions).map(([region, state]) => [region, {
+          ...state,
+          observations: (state.observations || []).filter((observation) => !baselineObservationIds[region].has(observation.id))
+        }]))
+      };
+    };
     let lastCheckpointAt = 0;
     const collectedObservations = await client.sampleAll({
       target: REFRESH_TARGET_PER_REGION,
@@ -147,7 +153,12 @@ async function refresh() {
     if ((sufficiency.publishable && completeCoverage) || QA_ALLOW_SMALL_SNAPSHOTS) { await store.addSnapshot(snapshot); await portableMetadataForSnapshot(snapshot).catch(() => {}); analysisCache.clear(); }
     await store.clearRefreshCheckpoint();
     job.state = 'completed'; job.stage = 'completed'; job.progressPercent = 100; job.completedAt = new Date().toISOString(); job.sufficiency = sufficiency;
-  } catch (error) { job.state = 'failed'; job.stage = 'failed'; job.error = error.message; }
+  } catch (error) {
+    if (error.message === REFRESH_CANCELLED) {
+      if (checkpointForStorage) await store.saveRefreshCheckpoint(checkpointForStorage());
+      job.state = 'cancelled'; job.stage = 'cancelled'; job.error = null; job.completedAt = new Date().toISOString(); job.checkpointDigest = store.state.refreshCheckpoint?.digest || null;
+    } else { job.state = 'failed'; job.stage = 'failed'; job.error = error.message; }
+  } finally { if (activeRefreshController === controller) activeRefreshController = null; }
 }
 
 export async function serveStatic(request, response) {
@@ -276,7 +287,8 @@ export async function createTftServer({ onShutdown = () => {}, onInstallUpdate =
     if (request.method === 'PUT' && request.url === '/api/settings') { const settings = await body(request); if (settings.language && !['es', 'en'].includes(settings.language)) return json(response, 400, { error: 'language_not_supported' }); if (settings.layout && !['standard', 'compact'].includes(settings.layout)) return json(response, 400, { error: 'layout_not_supported' }); return json(response, 200, await store.updateSettings(settings)); }
     if (request.method === 'PUT' && request.url === '/api/favorites') { const payload = await body(request); return json(response, 200, await store.setFavorite(payload.favorite, payload.active)); }
     if (request.method === 'PUT' && request.url === '/api/settings/riot-key') { await secrets.setRiotApiKey((await body(request)).key); return json(response, 204, {}); }
-    if (request.method === 'POST' && request.url === '/api/refresh') { if (['starting', 'running'].includes(job.state)) return json(response, 409, { error: 'refresh_in_progress' }); Object.assign(job, { state: 'starting', stage: 'starting', error: null, startedAt: new Date().toISOString(), completedAt: null, regions: {}, newObservations: 0, progressPercent: 0, targetPerRegion: REFRESH_TARGET_PER_REGION }); void refresh(); return json(response, 202, { state: 'started' }); }
+    if (request.method === 'POST' && request.url === '/api/refresh') { if (['starting', 'running'].includes(job.state)) return json(response, 409, { error: 'refresh_in_progress' }); const controller = new AbortController(); activeRefreshController = controller; Object.assign(job, { state: 'starting', stage: 'starting', error: null, startedAt: new Date().toISOString(), completedAt: null, regions: {}, newObservations: 0, progressPercent: 0, targetPerRegion: REFRESH_TARGET_PER_REGION, cancelRequested: false, checkpointDigest: null }); void refresh(controller); return json(response, 202, { state: 'started' }); }
+    if (request.method === 'POST' && request.url === '/api/refresh/cancel') { if (!['starting', 'running'].includes(job.state) || !activeRefreshController) return json(response, 409, { error: 'refresh_not_running' }); job.cancelRequested = true; job.stage = 'cancelling'; activeRefreshController.abort(); return json(response, 202, { state: 'cancelling' }); }
     if (request.method === 'DELETE' && request.url?.startsWith('/api/snapshots/')) { await store.deleteSnapshot(decodeURIComponent(request.url.slice('/api/snapshots/'.length))); analysisCache.clear(); return json(response, 204, {}); }
     if (request.method === 'DELETE' && request.url === '/api/snapshots') { await store.deleteAllSnapshots(); analysisCache.clear(); return json(response, 204, {}); }
     if (request.method === 'POST' && request.url === '/api/shutdown') { json(response, 202, { state: 'stopping' }); setTimeout(onShutdown, 50); return; }

@@ -10,6 +10,18 @@ let service;
 let serviceUrl;
 let mainWindow;
 
+const powershellQuote = (value) => `'${String(value).replace(/'/g, "''")}'`;
+
+function startElevatedRelauncher({ relauncher, installer, application, parentProcessId, statusFile }) {
+  const argumentsList = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', relauncher, '-Installer', installer, '-Application', application, '-ParentProcessId', String(parentProcessId), '-StatusFile', statusFile];
+  const command = `$argumentsList = @(${argumentsList.map(powershellQuote).join(', ')}); Start-Process -FilePath 'powershell.exe' -ArgumentList $argumentsList -Verb RunAs -ErrorAction Stop | Out-Null`;
+  return new Promise((resolve, reject) => {
+    const broker = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { windowsHide: true });
+    broker.once('error', reject);
+    broker.once('exit', (code) => code === 0 ? resolve() : reject(new Error(`UPDATE_ELEVATION_FAILED_${code ?? 'UNKNOWN'}`)));
+  });
+}
+
 if (process.env.TFTTOOL_ELECTRON_USER_DATA) {
   mkdirSync(process.env.TFTTOOL_ELECTRON_USER_DATA, { recursive: true });
   app.setPath('userData', process.env.TFTTOOL_ELECTRON_USER_DATA);
@@ -43,8 +55,8 @@ async function launch() {
       const relauncher = app.isPackaged
         ? join(process.resourcesPath, 'app.asar.unpacked', 'src', 'update-and-relaunch.ps1')
         : join(__dirname, '..', 'src', 'update-and-relaunch.ps1');
-      const update = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', relauncher, '-Installer', installer, '-Application', process.execPath, '-ParentProcessId', String(process.pid)], { detached: true, stdio: 'ignore', windowsHide: true });
-      update.unref();
+      const updateDirectory = join(process.env.TFTTOOL_DATA_DIR || join(process.env.LOCALAPPDATA || app.getPath('userData'), 'TFTTool'), 'updates');
+      await startElevatedRelauncher({ relauncher, installer, application: process.execPath, parentProcessId: process.pid, statusFile: join(updateDirectory, 'install-status.json') });
       setTimeout(() => app.quit(), 250);
     }
   });

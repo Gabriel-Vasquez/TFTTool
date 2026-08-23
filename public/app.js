@@ -310,15 +310,22 @@ function render() {
 function refreshMessage(refresh) {
   const newObservations = number.format(refresh?.newObservations || 0);
   const completed = Math.max(0, Math.min(100, Math.round(refresh?.progressPercent || 0)));
-  return language() === 'es'
+  const progress = language() === 'es'
     ? `${newObservations} observaciones nuevas detectadas: Actualizando. ${completed}% completado`
     : `${newObservations} new observations detected: Updating. ${completed}% complete`;
+  if (refresh?.cancelRequested || refresh?.stage === 'cancelling') return `${progress} · ${language() === 'es' ? 'Cancelando y guardando el progreso seguro…' : 'Cancelling and saving the safe checkpoint…'}`;
+  const waiting = Object.values(refresh?.regions || {}).find((item) => ['rate_limit', 'retry'].includes(item.stage));
+  if (!waiting) return progress;
+  const seconds = Math.max(0, Math.ceil(((waiting.retryUntil || (Date.now() + waiting.retryIn)) - Date.now()) / 1_000));
+  if (waiting.stage === 'rate_limit') return `${progress} · ${language() === 'es' ? `Límite de Riot API: esperando ${seconds}s para reintentar.` : `Riot API rate limit: retrying in ${seconds}s.`}`;
+  return `${progress} · ${language() === 'es' ? `Tiempo de espera o red de Riot API: reintentando en ${seconds}s.` : `Riot API timeout or network delay: retrying in ${seconds}s.`}`;
 }
 
 function renderRefreshProgress(snapshot = state.analysis) {
   const refresh = state.refresh || state.bootstrap?.refresh;
   const progress = $('#progress');
-  if (['starting', 'running'].includes(refresh?.state)) { progress.classList.remove('hidden'); progress.textContent = refreshMessage(refresh); return; }
+  if (['starting', 'running'].includes(refresh?.state)) { progress.classList.remove('hidden'); progress.innerHTML = `<span>${escapeHtml(refreshMessage(refresh))}</span><button type="button" data-cancel-refresh>${language() === 'es' ? 'Cancelar actualización' : 'Cancel update'}</button>`; return; }
+  if (refresh?.state === 'cancelled') { progress.classList.remove('hidden'); progress.textContent = language() === 'es' ? 'Actualización cancelada. El progreso descargado se guardó de forma segura para reanudarlo.' : 'Update cancelled. Downloaded progress was safely saved for resumption.'; return; }
   if (refresh?.state === 'failed') {
     progress.classList.remove('hidden');
     progress.textContent = refresh.error === 'RIOT_API_KEY_INVALID' ? (language() === 'es' ? 'La clave de Riot no es válida o ha caducado. Sustitúyela para reanudar la actualización.' : 'The Riot key is invalid or expired. Replace it to resume the update.') : refresh.error === 'RIOT_API_FORBIDDEN' ? (language() === 'es' ? 'Riot rechazó uno de los endpoints requeridos. La clave es válida; revisa el acceso de la aplicación.' : 'Riot rejected one of the required endpoints.') : `${language() === 'es' ? 'La actualización no se completó' : 'Update failed'}: ${refresh.error}`;
@@ -360,6 +367,12 @@ async function startRefresh() {
   renderRefreshProgress();
   clearTimeout(state.pollTimer);
   state.pollTimer = setTimeout(pollRefresh, 200);
+}
+
+async function cancelRefresh() {
+  await api('/api/refresh/cancel', { method: 'POST' });
+  state.refresh = { ...(state.refresh || {}), state: 'running', stage: 'cancelling', cancelRequested: true };
+  renderRefreshProgress();
 }
 
 async function pollRefresh() {
@@ -562,6 +575,7 @@ $('#language-toggle').addEventListener('click', async () => { await api('/api/se
 $('#layout-selector').addEventListener('change', async (event) => { const settings = await api('/api/settings', { method: 'PUT', body: JSON.stringify({ layout: event.target.value }) }); state.bootstrap.settings = settings; state.expandedCompositions.clear(); render(); });
 $('#region-filter').addEventListener('change', async (event) => { state.region = event.target.value; state.expandedCompositions.clear(); state.expandedInteractions.clear(); await load(); });
 $('#update').addEventListener('click', async () => { if (!state.bootstrap.hasApiKey) return openKey(); await startRefresh(); });
+$('#progress').addEventListener('click', async (event) => { if (event.target.closest('[data-cancel-refresh]')) await cancelRefresh(); });
 $('#content').addEventListener('click', async (event) => {
   if (event.target.closest('[data-open-key]')) return openKey();
   const favorite = event.target.closest('[data-favorite-kind]'); if (favorite) return toggleFavorite(favorite);

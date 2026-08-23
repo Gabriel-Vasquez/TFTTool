@@ -12,6 +12,7 @@ const MATCH_IDS_PER_PLAYER = 20;
 const INCREMENTAL_MATCH_IDS_PER_PLAYER = 100;
 const DEFAULT_INCREMENTAL_SCAN_LIMIT = 40;
 const MAX_CONCURRENT_REQUESTS_PER_ROUTE = 8;
+export const REFRESH_CANCELLED = 'REFRESH_CANCELLED';
 const tierPriority = (tier) => ELITE_TIERS.indexOf(String(tier || '').toUpperCase());
 const matchSequence = (id) => Number(String(id || '').match(/_(\d+)$/)?.[1]) || 0;
 const compareCandidateMatches = (left, right) => matchSequence(right[0]) - matchSequence(left[0]) || right[1] - left[1] || right[0].localeCompare(left[0]);
@@ -24,11 +25,12 @@ function retainCurrentSample(observations, patch, target, now = Date.now()) {
     .slice(0, target);
 }
 
-async function mapConcurrent(entries, limit, mapper) {
+async function mapConcurrent(entries, limit, mapper, isCancelled = () => false) {
   const results = new Array(entries.length);
   let next = 0;
   const workers = Array.from({ length: Math.min(Math.max(1, limit), entries.length) }, async () => {
     while (next < entries.length) {
+      if (isCancelled()) throw new Error(REFRESH_CANCELLED);
       const index = next;
       next += 1;
       results[index] = await mapper(entries[index], index);
@@ -39,16 +41,30 @@ async function mapConcurrent(entries, limit, mapper) {
 }
 
 export class RiotClient {
-  constructor(apiKey, { onProgress = () => {}, fetchImpl = fetch, pauseImpl = pause, requestTimeout = 15_000, maxConcurrentRequestsPerRoute = MAX_CONCURRENT_REQUESTS_PER_ROUTE } = {}) {
+  constructor(apiKey, { onProgress = () => {}, fetchImpl = fetch, pauseImpl = pause, signal = null, requestTimeout = 15_000, maxConcurrentRequestsPerRoute = MAX_CONCURRENT_REQUESTS_PER_ROUTE } = {}) {
     this.apiKey = apiKey;
     this.onProgress = onProgress;
     this.fetch = fetchImpl;
     this.pause = pauseImpl;
+    this.signal = signal;
     this.requestTimeout = requestTimeout;
     this.maxConcurrentRequestsPerRoute = Math.max(1, maxConcurrentRequestsPerRoute);
     this.matches = new Map();
     this.authenticated = false;
     this.routes = new Map();
+  }
+
+  throwIfCancelled() { if (this.signal?.aborted) throw new Error(REFRESH_CANCELLED); }
+
+  async waitForRetry(milliseconds) {
+    this.throwIfCancelled();
+    if (!this.signal) return this.pause(milliseconds);
+    await new Promise((resolve, reject) => {
+      const cancel = () => { this.signal.removeEventListener('abort', cancel); reject(new Error(REFRESH_CANCELLED)); };
+      this.signal.addEventListener('abort', cancel, { once: true });
+      this.pause(milliseconds).then(() => { this.signal.removeEventListener('abort', cancel); resolve(); }, reject);
+    });
+    this.throwIfCancelled();
   }
 
   routeState(url) {
@@ -60,6 +76,7 @@ export class RiotClient {
   async withRouteSlot(url, action) {
     const state = this.routeState(url);
     if (state.active >= this.maxConcurrentRequestsPerRoute) await new Promise((resolve) => state.waiting.push(resolve));
+    this.throwIfCancelled();
     state.active += 1;
     try { return await action(state); }
     finally {
@@ -71,20 +88,26 @@ export class RiotClient {
   async request(url, attempts = 4, progressRegion = this.activeRegion) {
     return this.withRouteSlot(url, async (route) => {
       for (let attempt = 0; attempt < attempts; attempt += 1) {
+        this.throwIfCancelled();
         const cooldown = Math.max(0, route.cooldownUntil - Date.now());
         if (cooldown) {
           this.onProgress({ region: progressRegion, stage: 'rate_limit', retryIn: cooldown, retryUntil: route.cooldownUntil });
-          await this.pause(cooldown);
+          await this.waitForRetry(cooldown);
         }
         let response;
-        try { response = await this.fetch(url, { headers: { 'X-Riot-Token': this.apiKey }, signal: AbortSignal.timeout(this.requestTimeout) }); }
+        const requestController = new AbortController();
+        const timeout = setTimeout(() => requestController.abort(), this.requestTimeout);
+        const cancel = () => requestController.abort();
+        this.signal?.addEventListener('abort', cancel, { once: true });
+        try { response = await this.fetch(url, { headers: { 'X-Riot-Token': this.apiKey }, signal: requestController.signal }); }
         catch (error) {
+          if (this.signal?.aborted) throw new Error(REFRESH_CANCELLED);
           if (attempt === attempts - 1) throw new Error(`Riot API network request failed after retries: ${error.message}`);
           const retryIn = 500 * 2 ** attempt;
           this.onProgress({ region: progressRegion, stage: 'retry', retryIn, retryUntil: Date.now() + retryIn });
-          await this.pause(retryIn);
+          await this.waitForRetry(retryIn);
           continue;
-        }
+        } finally { clearTimeout(timeout); this.signal?.removeEventListener('abort', cancel); }
         if (response.ok) { this.authenticated = true; return response.json(); }
         if (response.status === 401 || (response.status === 403 && !this.authenticated)) throw new Error('RIOT_API_KEY_INVALID');
         if (response.status === 403) throw new Error('RIOT_API_FORBIDDEN');
@@ -95,7 +118,7 @@ export class RiotClient {
           route.cooldownUntil = Math.max(route.cooldownUntil, Date.now() + retryIn);
           this.onProgress({ region: progressRegion, stage: 'rate_limit', retryIn, retryUntil: route.cooldownUntil });
         }
-        await this.pause(retryIn);
+        await this.waitForRetry(retryIn);
       }
       throw new Error('Riot API request failed after retries.');
     });
@@ -207,7 +230,7 @@ export class RiotClient {
             const discovered = await mapConcurrent(discoveryPlayers, this.maxConcurrentRequestsPerRoute, async (player, index) => {
               report({ region, stage: 'discovering', playersScanned: discoveryEnd - discoveryPlayers.length + index + 1, tier: ELITE_TIERS[phase.priority], progressPercent: Math.min(35, Math.round(((discoveryEnd - discoveryPlayers.length + index + 1) / Math.max(players.length, 1)) * 35)) });
               return player.puuid ? this.matchIds(region, player.puuid, { startTime: oldestStartTime, count: MATCH_IDS_PER_PLAYER }) : [];
-            });
+            }, () => this.signal?.aborted);
             for (const ids of discovered) for (const id of ids) if ((processedMatchPriority.get(id) ?? -1) < phase.priority) candidates.set(id, (candidates.get(id) || 0) + 1);
             if (playersScanned % 50 === 0 || playersScanned === phase.end) await checkpoint({ observations, playersScanned, currentPatch: currentPatch || baselinePatch, completed: false, incremental: false, scanLimit, phasePriority: phase.priority, candidateMatches: [...candidates], candidateOffset: 0 });
             candidates = new Map([...candidates].sort(compareCandidateMatches));
@@ -224,7 +247,7 @@ export class RiotClient {
               const matchesScanned = scannedStart + index + 1;
               report({ stage: 'scanning', playersScanned, matchesScanned, candidateMatches: orderedCandidates.length, tier: ELITE_TIERS[phase.priority], progressPercent: Math.min(99, 35 + Math.round((matchesScanned / Math.max(orderedCandidates.length, 1)) * 60)) });
               return (processedMatchPriority.get(id) ?? -1) >= phase.priority ? null : this.match(region, id);
-            });
+            }, () => this.signal?.aborted);
             for (let index = 0; index < candidateBatch.length && observations.length < target; index += 1) {
               const id = candidateBatch[index];
               const match = matches[index];
@@ -254,7 +277,7 @@ export class RiotClient {
       const listed = await mapConcurrent(scanPlayers, this.maxConcurrentRequestsPerRoute, async (player, index) => {
         report({ stage: 'scanning', playersScanned: scanEnd - scanPlayers.length + index + 1, progressPercent: Math.round(((scanEnd - scanPlayers.length + index + 1) / Math.max(scanLimit, 1)) * 45) });
         return { player, ids: player.puuid ? await this.matchIds(region, player.puuid, { startTime: incrementalStartTime, count: INCREMENTAL_MATCH_IDS_PER_PLAYER }) : [] };
-      });
+      }, () => this.signal?.aborted);
       const candidates = new Map();
       for (const { player, ids } of listed) {
         const priority = Math.max(tierPriority(player.tier), tierPriority('GRANDMASTER'));
@@ -263,7 +286,7 @@ export class RiotClient {
       const orderedCandidates = [...candidates.keys()].sort((left, right) => matchSequence(right) - matchSequence(left) || left.localeCompare(right));
       for (let offset = 0; offset < orderedCandidates.length; offset += this.maxConcurrentRequestsPerRoute) {
         const candidateBatch = orderedCandidates.slice(offset, offset + this.maxConcurrentRequestsPerRoute);
-        const matches = await mapConcurrent(candidateBatch, this.maxConcurrentRequestsPerRoute, (id) => this.match(region, id));
+        const matches = await mapConcurrent(candidateBatch, this.maxConcurrentRequestsPerRoute, (id) => this.match(region, id), () => this.signal?.aborted);
         for (let index = 0; index < candidateBatch.length; index += 1) {
           const id = candidateBatch[index];
           const priority = candidates.get(id);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { RiotClient } from '../src/riot/client.mjs';
+import { REFRESH_CANCELLED, RiotClient } from '../src/riot/client.mjs';
 
 test('sampler uses the ladder PUUID directly and collects a current ranked board', async () => {
   const client = new RiotClient('test');
@@ -246,6 +246,18 @@ test('rate limits report retry progress and recover without exposing the key', a
   assert.equal(progress[0].stage, 'rate_limit');
   assert.ok(progress[0].retryUntil > Date.now());
   assert.equal(JSON.stringify(progress).includes('secret'), false);
+});
+
+test('a requested refresh cancellation aborts an in-flight Riot request without retrying it', async () => {
+  const controller = new AbortController();
+  const client = new RiotClient('test', {
+    signal: controller.signal,
+    fetchImpl: async (url, { signal }) => new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true }))
+  });
+  const pending = client.request('https://example.test/cancel');
+  await Promise.resolve();
+  controller.abort();
+  await assert.rejects(pending, new RegExp(REFRESH_CANCELLED));
 });
 
 test('invalid credentials are classified before any authenticated request succeeds', async () => {

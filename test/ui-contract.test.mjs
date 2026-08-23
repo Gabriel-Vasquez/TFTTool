@@ -145,6 +145,11 @@ test('refresh status polls a lightweight endpoint and reports only newly detecte
   assert.match(server, /request\.method === 'GET' && request\.url === '\/api\/refresh'/);
   assert.match(server, /newObservations/);
   assert.match(server, /progressPercent/);
+  assert.match(app, /data-cancel-refresh/);
+  assert.match(app, /api\('\/api\/refresh\/cancel'/);
+  assert.match(app, /Riot API timeout or network delay/);
+  assert.match(server, /REFRESH_CANCELLED/);
+  assert.match(server, /checkpointDigest/);
 });
 
 test('portable data controls export and atomically import one tftpack without a Riot request', async () => {
@@ -178,12 +183,13 @@ test('settings opens as a floating dialog with a verified application updater', 
   assert.match(css, /\.sidebar \{ position:fixed;z-index:30;left:0;top:0;bottom:0;[^}]*height:100vh;overflow:hidden/);
   assert.match(css, /\.sidebar-bottom \{ flex:0 0 auto;margin-top:auto/);
   assert.match(launcher, /update-and-relaunch\.ps1/);
-  assert.match(launcher, /'-ParentProcessId', String\(process\.pid\)/);
+  assert.match(launcher, /'-ParentProcessId', String\(parentProcessId\)/);
   assert.match(launcher, /spawn\('powershell\.exe'/);
   assert.equal(JSON.parse(packageJson).build.nsis.perMachine, true);
-  assert.match(relauncher, /-Verb RunAs/);
+  assert.match(launcher, /-Verb RunAs/);
   assert.match(relauncher, /"\/D=\$installationDirectory"/);
-  assert.match(relauncher, /install-status\.json/);
+  assert.match(launcher, /install-status\.json/);
+  assert.match(relauncher, /\[string\]\$StatusFile/);
 });
 
 test('one-star badges are muted while two-star badges are white and three-star badges remain prominent', async () => {

@@ -1,8 +1,10 @@
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { REGIONS, TARGET_OBSERVATIONS_PER_REGION } from '../config.mjs';
 
 const pause = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const checkpointDigest = (checkpoint) => createHash('sha256').update(JSON.stringify(checkpoint)).digest('hex');
 
 export function favoriteKey(favorite) {
   return favorite.kind === 'variant' ? `variant:${favorite.compositionId}:${favorite.championIds.join('+')}` : `archetype:${favorite.compositionId}`;
@@ -43,7 +45,15 @@ export class LocalStore {
   async load() {
     await mkdir(this.directory, { recursive: true });
     try { const saved = JSON.parse(await readFile(this.file, 'utf8')); const favorites = [...new Map((saved.favorites || []).flatMap((favorite) => { try { const normalized = normalizeFavorite(favorite); return [[favoriteKey(normalized), normalized]]; } catch { return []; } })).values()].sort((left, right) => favoriteKey(left).localeCompare(favoriteKey(right))); this.state = { ...this.state, ...saved, settings: { ...this.state.settings, ...(saved.settings || {}) }, favorites, bundledSnapshotHashes: { ...this.state.bundledSnapshotHashes, ...(saved.bundledSnapshotHashes || {}) } }; } catch (error) { if (error.code !== 'ENOENT') throw error; }
-    try { this.state.refreshCheckpoint = JSON.parse(await readFile(this.refreshCheckpointFile, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    try {
+      const savedCheckpoint = JSON.parse(await readFile(this.refreshCheckpointFile, 'utf8'));
+      const { digest, ...checkpoint } = savedCheckpoint;
+      if (!digest || digest !== checkpointDigest(checkpoint)) throw new Error('REFRESH_CHECKPOINT_DIGEST_INVALID');
+      this.state.refreshCheckpoint = savedCheckpoint;
+    } catch (error) {
+      if (error.code === 'ENOENT') { /* no resumable refresh */ }
+      else { await rm(this.refreshCheckpointFile, { force: true }); this.state.refreshCheckpoint = null; }
+    }
     return this.state;
   }
 
@@ -142,6 +152,10 @@ export class LocalStore {
       observations: this.latestSnapshot()?.observations.length || 0
     };
   }
-  async saveRefreshCheckpoint(checkpoint) { this.state.refreshCheckpoint = checkpoint; await this.enqueueSave(() => this.writeAtomic(this.refreshCheckpointFile, checkpoint)); }
+  async saveRefreshCheckpoint(checkpoint) {
+    const savedCheckpoint = { ...checkpoint, digest: checkpointDigest(checkpoint) };
+    this.state.refreshCheckpoint = savedCheckpoint;
+    await this.enqueueSave(() => this.writeAtomic(this.refreshCheckpointFile, savedCheckpoint));
+  }
   async clearRefreshCheckpoint() { this.state.refreshCheckpoint = null; await this.enqueueSave(() => rm(this.refreshCheckpointFile, { force: true })); }
 }

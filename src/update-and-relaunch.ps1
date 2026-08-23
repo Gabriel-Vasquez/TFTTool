@@ -1,16 +1,16 @@
 param(
   [Parameter(Mandatory = $true)][string]$Installer,
   [Parameter(Mandatory = $true)][string]$Application,
-  [Parameter(Mandatory = $true)][int]$ParentProcessId
+  [Parameter(Mandatory = $true)][int]$ParentProcessId,
+  [Parameter(Mandatory = $true)][string]$StatusFile
 )
 
 $ErrorActionPreference = 'Stop'
-$statusDirectory = Join-Path $env:LOCALAPPDATA 'TFTTool\updates'
-$statusFile = Join-Path $statusDirectory 'install-status.json'
+$statusDirectory = Split-Path -Parent $StatusFile
 
 function Save-UpdateStatus([string]$state, [string]$detail = '') {
   New-Item -ItemType Directory -Path $statusDirectory -Force | Out-Null
-  @{ state = $state; detail = $detail; updatedAt = [DateTime]::UtcNow.ToString('o') } | ConvertTo-Json -Compress | Set-Content -Path $statusFile -Encoding UTF8
+  @{ state = $state; detail = $detail; updatedAt = [DateTime]::UtcNow.ToString('o') } | ConvertTo-Json -Compress | Set-Content -Path $StatusFile -Encoding UTF8
 }
 
 try {
@@ -24,7 +24,7 @@ try {
   $installationDirectory = Split-Path -Parent $Application
   $applicationName = Split-Path -Leaf $Application
   Save-UpdateStatus 'installing'
-  $installation = Start-Process -FilePath $Installer -ArgumentList @('/S', "/D=$installationDirectory") -Verb RunAs -Wait -PassThru
+  $installation = Start-Process -FilePath $Installer -ArgumentList @('/S', "/D=$installationDirectory") -Wait -PassThru
   if ($installation.ExitCode -ne 0) { throw "INSTALLER_EXIT_$($installation.ExitCode)" }
   $installedApplication = Join-Path $installationDirectory $applicationName
   if (-not (Test-Path $installedApplication)) { throw 'INSTALLED_APPLICATION_MISSING' }

@@ -45,9 +45,25 @@ test('concurrent local mutations serialize atomic state writes', async (t) => {
   assert.equal(saved.refreshCheckpoint, null);
   const checkpoint = JSON.parse(await readFile(join(directory, 'refresh-checkpoint.json'), 'utf8'));
   assert.ok(checkpoint.startedAt);
+  assert.match(checkpoint.digest, /^[a-f0-9]{64}$/);
   const reloaded = new LocalStore(directory);
   await reloaded.load();
   assert.ok(reloaded.state.refreshCheckpoint.startedAt);
+});
+
+test('invalid refresh checkpoint digests are discarded without touching snapshots or settings', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'tfttool-store-digest-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = new LocalStore(directory);
+  await store.load();
+  await store.updateSettings({ language: 'en' });
+  await store.addSnapshot(publishableSnapshot('safe', '2026-08-21T00:00:00.000Z'));
+  await writeFile(join(directory, 'refresh-checkpoint.json'), JSON.stringify({ startedAt: new Date().toISOString(), regions: {}, digest: '0'.repeat(64) }));
+  const reloaded = new LocalStore(directory);
+  await reloaded.load();
+  assert.equal(reloaded.state.refreshCheckpoint, null);
+  assert.equal(reloaded.state.settings.language, 'en');
+  assert.equal(reloaded.latestSnapshot().id, 'safe');
 });
 
 test('favorites are canonical, local, and preserved by portable data imports', async (t) => {
