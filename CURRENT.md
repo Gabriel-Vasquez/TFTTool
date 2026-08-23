@@ -12,9 +12,9 @@ All development and testing must run in the repository-owned isolated QA sandbox
 
 The first owner-facing in-place update must include the complete, freshly validated six-region real-data snapshot collected during QA so the product is ready for immediate use without another same-day refresh. Never discard that retrieved dataset. Import it only when newer than the owner's latest local snapshot, while preserving every existing historical snapshot, setting, and encrypted Riot key.
 
-- Phase: TFTTool 0.6.18 is published on public `main`. It repairs the failed 0.6.16/0.6.17 elevation handoff, adds safe resumable refresh cancellation, and makes stalled refresh status explain transient Riot waits.
+- Phase: TFTTool 0.6.19 is in release QA as a deliberately no-functional-change updater test from the repaired 0.6.18 installation.
 - Branch: `main`.
-- Published release: TFTTool `0.6.18` is available on public `main` with tag `v0.6.18`; `updates/stable.json` references the verified `TFTTool.Setup.0.6.18.exe` asset.
+- Published release: TFTTool `0.6.18` is available on public `main` with tag `v0.6.18`; `0.6.19` will replace the stable manifest only after its installer and public asset checksum are verified.
 - GitHub: public `Gabriel-Vasquez/TFTTool`.
 - Implemented and installed: official multi-region Riot ingestion, protected local key storage and invalid-key replacement, full baseline plus incremental diff refresh, deterministic current-set archetypes, real trait breakpoints, exact prevalence/raw-placement weighting, TFTactics-style champion/item presentation, flagship-relative variant diffs, Team Planner export codes, shared-lobby matchup and opponent-conditioned Counter Item analytics, evidence drill-downs, snapshot history/trends, portable `.tftpack` transfer, complete EN/ES UX, bounded rendering/search, secured standalone Electron window, local shutdown control, compressed bundled snapshot import, and NSIS in-place updating.
 - Owner-data baseline: TFTTool 0.6.1 is installed at `C:\Program Files\TFTTool`. The data directory, encrypted key availability, Spanish preference, snapshot identity, history, and all 12,000 observations remain preserved after the in-place migration.
@@ -45,12 +45,13 @@ The first owner-facing in-place update must include the complete, freshly valida
 - Version 0.6.16 fixes the failed 0.6.15 delivery path for protected Program Files installations. The NSIS installer is explicitly per-machine, so Windows requests elevation when needed; the relaunch helper supplies the active installation directory as the final NSIS `/D` argument, verifies that exact executable after the installer exits, then relaunches it. It records a credential-free completion/failure status locally and restores the pre-update executable if an update is cancelled or fails.
 - Version 0.6.17 is intentionally functionally identical to 0.6.16. It exists solely as a controlled public release for the owner to validate the repaired in-place update behavior from a known-good 0.6.16 Program Files installation.
 - Version 0.6.18 moves the Windows UAC/elevation broker before the application closes. A refused or failed elevation leaves TFTTool open and reports the failure; an accepted broker launches the elevated helper, which waits for the exact parent exit, updates the same directory, verifies the executable, and relaunches. Data refresh status now explains active Riot rate-limit and retry waits without obscuring normal progress. A user can cancel a refresh: in-flight requests and backoffs are aborted, the current valid snapshot stays untouched, and a SHA-256-verified checkpoint of already downloaded work is persisted for resume; invalid checkpoint sidecars are discarded without changing data or settings.
+- Version 0.6.19 is intentionally functionally identical to 0.6.18. It is a controlled public release used only to validate the repaired in-place updater from an already repaired 0.6.18 installation.
 - The Settings application-update button fetches the public stable manifest from `main`, accepts only this repository's HTTPS release assets, verifies exact byte size and SHA-256, then launches the NSIS in-place update. Version 0.6.2 is the final release requiring manual installer distribution.
 
 ## Next actions
 
-1. Complete isolated package and public-channel validation of 0.6.18, then publish it and repair the owner installation in place from the verified public installer.
-2. Validate the next updater jump from the repaired 0.6.18 installation with a controlled no-functional-change release only if the owner requests that interactive UAC test.
+1. Complete isolated package and public-channel validation of 0.6.19, then publish it as the controlled update test.
+2. Finish the already authorized 0.6.18 in-place repair after the owner accepts the Windows UAC consent prompt, then use the Settings update button to test the 0.6.18-to-0.6.19 jump.
 3. Future explicit data refreshes reuse the rolling five-day/current-patch sample and request only post-baseline match IDs plus unseen match details.
 
 ## Blockers
