@@ -1,7 +1,7 @@
 import { buildTeamCode } from './team-code.js';
 
 const ITEM_FILTER_TYPES = ['regular', 'emblem', 'radiant', 'artifact', 'support', 'set_mechanic', 'unknown'];
-const state = { tab: 'home', bootstrap: null, analysis: null, history: null, metadata: null, search: '', region: 'GLOBAL', weight: 50, championItemWeight: 100, snapshotId: null, keyPrompted: false, keySaving: false, pollTimer: null, updatePollTimer: null, dataPackStatus: '', copyStatus: '', itemTypes: new Set(ITEM_FILTER_TYPES), selectedSynergies: new Set(), synergyMenuOpen: false, expandedCompositions: new Set(), expandedInteractions: new Set() };
+const state = { tab: 'home', bootstrap: null, analysis: null, history: null, metadata: null, search: '', region: 'GLOBAL', weight: 50, championItemWeight: 100, snapshotId: null, keyPrompted: false, keySaving: false, refresh: null, refreshWasRunning: false, pollTimer: null, updatePollTimer: null, dataPackStatus: '', copyStatus: '', itemTypes: new Set(ITEM_FILTER_TYPES), selectedSynergies: new Set(), synergyMenuOpen: false, expandedCompositions: new Set(), expandedInteractions: new Set() };
 const copy = {
   es: { home: 'Meta actual', homeNav: 'Meta', favorites: 'Favoritos', items: 'Objetos', champions: 'Campeones', synergies: 'Sinergias', interactions: 'Interacciones', history: 'Historial', settings: 'Ajustes', eyebrow: 'ANÁLISIS DE ÉLITE', globalRegions: 'Global · todas las regiones', update: 'Actualizar datos', establishedMeta: 'Meta establecido', performance: 'Rendimiento', noData: 'Aún no hay una instantánea de meta', noDataDetail: 'Añade tu clave de Riot Games y pulsa Actualizar datos. El análisis usa exclusivamente partidas clasificatorias recientes y datos oficiales.', configure: 'Configurar clave de Riot', observations: 'observaciones', average: 'Posición media', top4: 'Top 4', win: 'Victoria', score: 'Puntuación meta', prevalence: 'Prevalencia', variants: 'variantes', patch: 'Parche', updated: 'Actualizado', compositions: 'Composiciones', noResults: 'Sin resultados', noResultsDetail: 'No hay resultados para el filtro actual.', evidence: 'EVIDENCIA Y DESGLOSE', sourceGames: 'Partidas fuente', officialIntegration: 'INTEGRACIÓN OFICIAL', riotKey: 'Clave de Riot Games', keySafety: 'Se cifra localmente para tu cuenta de Windows. Nunca se envía fuera de Riot ni se guarda en el repositorio.', saveRefresh: 'Guardar y actualizar', closeServer: 'Cerrar TFTTool', language: 'Idioma', preferences: 'PREFERENCIAS LOCALES', searchPlaceholder: 'Buscar campeones, objetos, sinergias o interacciones', expand: 'Ver variantes', collapse: 'Ocultar variantes' },
   en: { home: 'Current meta', homeNav: 'Meta', favorites: 'Favorites', items: 'Items', champions: 'Champions', synergies: 'Synergies', interactions: 'Team Interactions', history: 'History', settings: 'Settings', eyebrow: 'ELITE ANALYSIS', globalRegions: 'Global · all regions', update: 'Update data', establishedMeta: 'Established meta', performance: 'Performance', noData: 'No meta snapshot yet', noDataDetail: 'Add your Riot Games key and press Update data. Analysis uses only recent ranked games and official data.', configure: 'Configure Riot key', observations: 'observations', average: 'Average placement', top4: 'Top 4', win: 'Win rate', score: 'Meta score', prevalence: 'Prevalence', variants: 'variants', patch: 'Patch', updated: 'Updated', compositions: 'Compositions', noResults: 'No results', noResultsDetail: 'There are no results for the current filter.', evidence: 'EVIDENCE AND BREAKDOWN', sourceGames: 'Source games', officialIntegration: 'OFFICIAL INTEGRATION', riotKey: 'Riot Games key', keySafety: 'It is encrypted locally for your Windows account. It is never sent anywhere except Riot or stored in the repository.', saveRefresh: 'Save and update', closeServer: 'Close TFTTool', language: 'Language', preferences: 'LOCAL PREFERENCES', searchPlaceholder: 'Search champions, items, traits, or interactions', expand: 'Show variants', collapse: 'Hide variants' }
@@ -303,12 +303,33 @@ function render() {
   $('#content').innerHTML = `${filterable && snapshot ? itemFilterBar() : ''}${['home', 'favorites'].includes(state.tab) && snapshot ? synergyFilterBar() : ''}${view}`;
   $('#connection').textContent = snapshot ? `${number.format(snapshot.result.observations)} ${text('observations')}` : (language() === 'es' ? 'Sin datos' : 'No data');
   $('#connection').classList.toggle('live', Boolean(snapshot));
-  const refresh = state.bootstrap.refresh;
-  const progress = $('#progress');
-  clearTimeout(state.pollTimer); state.pollTimer = null;
+  const refresh = null;
+  const progress = { classList: { add: () => {}, remove: () => {} }, textContent: '' };
   if (refresh?.state === 'running') { progress.classList.remove('hidden'); const stage = refresh.stage === 'processing' ? (language() === 'es' ? 'Procesando estadísticas' : 'Processing statistics') : refresh.stage === 'saving' ? (language() === 'es' ? 'Guardando instantánea' : 'Saving snapshot') : (language() === 'es' ? 'Actualizando' : 'Updating'); progress.textContent = `${stage}… ${Object.values(refresh.regions).map((item) => `${item.region}: ${['rate_limit', 'retry'].includes(item.stage) ? `${language() === 'es' ? 'reintentando en' : 'retrying in'} ${Math.max(0, Math.ceil(((item.retryUntil || (Date.now() + item.retryIn)) - Date.now()) / 1000))} s` : `${item.observations || 0} / ${number.format(refresh.targetPerRegion || 0)} ${text('observations')} · ${item.playersScanned || 0} ${language() === 'es' ? 'jugadores' : 'players'}`}`).join(' · ') || (language() === 'es' ? 'iniciando' : 'starting')}`; state.pollTimer = setTimeout(load, 3_000); } else if (refresh?.state === 'failed') { progress.classList.remove('hidden'); progress.textContent = refresh.error === 'RIOT_API_KEY_INVALID' ? (language() === 'es' ? 'La clave de Riot no es válida o ha caducado. Sustitúyela para reanudar la actualización.' : 'The Riot key is invalid or expired. Replace it to resume the update.') : refresh.error === 'RIOT_API_FORBIDDEN' ? (language() === 'es' ? 'Riot rechazó uno de los endpoints requeridos. La clave es válida; revisa el acceso de la aplicación.' : 'Riot rejected one of the required endpoints. The key is valid; review application access.') : `${language() === 'es' ? 'La actualización no se completó' : 'Update failed'}: ${refresh.error}`; if (refresh.error === 'RIOT_API_KEY_INVALID' && !state.keyPrompted) { state.keyPrompted = true; queueMicrotask(openKey); } } else if (snapshot && !snapshot.sufficiency?.publishable) { progress.classList.remove('hidden'); progress.textContent = `${language() === 'es' ? 'Cobertura incompleta' : 'Incomplete coverage'}: ${snapshot.sufficiency?.reasons?.map(sufficiencyReason).join(' ') || (language() === 'es' ? 'muestra degradada' : 'degraded sample')}`; } else progress.classList.add('hidden');
 }
-async function load() { const [bootstrap, snapshots] = await Promise.all([api('/api/bootstrap'), api('/api/snapshots')]); state.bootstrap = { ...bootstrap, snapshots }; const snapshot = state.snapshotId ? `&snapshot=${encodeURIComponent(state.snapshotId)}` : ''; [state.analysis, state.history] = await Promise.all([api(`/api/analysis?region=${encodeURIComponent(state.region)}${snapshot}`), api('/api/history')]); state.metadata = null; if (state.analysis) { try { state.metadata = await api(`/api/metadata?patch=${encodeURIComponent(state.analysis.patch || '')}&locale=${language() === 'en' ? 'en_US' : 'es_ES'}`); } catch {} } render(); }
+function refreshMessage(refresh) {
+  const newObservations = number.format(refresh?.newObservations || 0);
+  const completed = Math.max(0, Math.min(100, Math.round(refresh?.progressPercent || 0)));
+  return language() === 'es'
+    ? `${newObservations} observaciones nuevas detectadas: Actualizando. ${completed}% completado`
+    : `${newObservations} new observations detected: Updating. ${completed}% complete`;
+}
+
+function renderRefreshProgress(snapshot = state.analysis) {
+  const refresh = state.refresh || state.bootstrap?.refresh;
+  const progress = $('#progress');
+  if (['starting', 'running'].includes(refresh?.state)) { progress.classList.remove('hidden'); progress.textContent = refreshMessage(refresh); return; }
+  if (refresh?.state === 'failed') {
+    progress.classList.remove('hidden');
+    progress.textContent = refresh.error === 'RIOT_API_KEY_INVALID' ? (language() === 'es' ? 'La clave de Riot no es válida o ha caducado. Sustitúyela para reanudar la actualización.' : 'The Riot key is invalid or expired. Replace it to resume the update.') : refresh.error === 'RIOT_API_FORBIDDEN' ? (language() === 'es' ? 'Riot rechazó uno de los endpoints requeridos. La clave es válida; revisa el acceso de la aplicación.' : 'Riot rejected one of the required endpoints.') : `${language() === 'es' ? 'La actualización no se completó' : 'Update failed'}: ${refresh.error}`;
+    if (refresh.error === 'RIOT_API_KEY_INVALID' && !state.keyPrompted) { state.keyPrompted = true; queueMicrotask(openKey); }
+    return;
+  }
+  if (snapshot && !snapshot.sufficiency?.publishable) { progress.classList.remove('hidden'); progress.textContent = `${language() === 'es' ? 'Cobertura incompleta' : 'Incomplete coverage'}: ${snapshot.sufficiency?.reasons?.map(sufficiencyReason).join(' ') || (language() === 'es' ? 'muestra degradada' : 'degraded sample')}`; return; }
+  progress.classList.add('hidden');
+}
+
+async function load() { const [bootstrap, snapshots] = await Promise.all([api('/api/bootstrap'), api('/api/snapshots')]); state.bootstrap = { ...bootstrap, snapshots }; state.refresh = bootstrap.refresh; const snapshot = state.snapshotId ? `&snapshot=${encodeURIComponent(state.snapshotId)}` : ''; [state.analysis, state.history] = await Promise.all([api(`/api/analysis?region=${encodeURIComponent(state.region)}${snapshot}`), api('/api/history')]); state.metadata = null; if (state.analysis) { try { state.metadata = await api(`/api/metadata?patch=${encodeURIComponent(state.analysis.patch || '')}&locale=${language() === 'en' ? 'en_US' : 'es_ES'}`); } catch {} } render(); renderRefreshProgress(); }
 function setKeySaving(saving) {
   state.keySaving = saving;
   $('#riot-key').disabled = saving;
@@ -334,7 +355,22 @@ async function startRefresh() {
   state.snapshotId = null;
   try { await api('/api/refresh', { method: 'POST' }); }
   catch (error) { if (error.message !== 'refresh_in_progress') throw error; }
-  await load();
+  state.refreshWasRunning = true;
+  state.refresh = { state: 'starting', newObservations: 0, progressPercent: 0 };
+  renderRefreshProgress();
+  clearTimeout(state.pollTimer);
+  state.pollTimer = setTimeout(pollRefresh, 200);
+}
+
+async function pollRefresh() {
+  try {
+    state.refresh = await api('/api/refresh');
+    renderRefreshProgress();
+    if (['starting', 'running'].includes(state.refresh.state)) { state.pollTimer = setTimeout(pollRefresh, 1_000); return; }
+    if (state.refreshWasRunning) { state.refreshWasRunning = false; await load(); }
+  } catch {
+    if (state.refreshWasRunning) state.pollTimer = setTimeout(pollRefresh, 1_000);
+  }
 }
 
 function openSettings() {

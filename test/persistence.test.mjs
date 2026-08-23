@@ -42,7 +42,12 @@ test('concurrent local mutations serialize atomic state writes', async (t) => {
   const saved = JSON.parse(await readFile(join(directory, 'state.json'), 'utf8'));
   assert.equal(saved.settings.language, 'en');
   assert.equal(saved.snapshots[0].id, 'snapshot');
-  assert.ok(saved.refreshCheckpoint.startedAt);
+  assert.equal(saved.refreshCheckpoint, null);
+  const checkpoint = JSON.parse(await readFile(join(directory, 'refresh-checkpoint.json'), 'utf8'));
+  assert.ok(checkpoint.startedAt);
+  const reloaded = new LocalStore(directory);
+  await reloaded.load();
+  assert.ok(reloaded.state.refreshCheckpoint.startedAt);
 });
 
 test('favorites are canonical, local, and preserved by portable data imports', async (t) => {

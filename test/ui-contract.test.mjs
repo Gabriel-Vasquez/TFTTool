@@ -131,6 +131,22 @@ test('Riot key dialog is always closable and persists independently before refre
   assert.match(app, /function setKeySaving/);
 });
 
+test('refresh status polls a lightweight endpoint and reports only newly detected observations', async () => {
+  const [app, server] = await Promise.all([
+    readFile(join(root, 'public', 'app.js'), 'utf8'),
+    readFile(join(root, 'src', 'server.mjs'), 'utf8')
+  ]);
+  assert.match(app, /function refreshMessage/);
+  assert.match(app, /observaciones nuevas detectadas: Actualizando/);
+  assert.match(app, /new observations detected: Updating/);
+  assert.match(app, /async function pollRefresh/);
+  assert.match(app, /api\('\/api\/refresh'\)/);
+  assert.match(app, /setTimeout\(pollRefresh, 1_000\)/);
+  assert.match(server, /request\.method === 'GET' && request\.url === '\/api\/refresh'/);
+  assert.match(server, /newObservations/);
+  assert.match(server, /progressPercent/);
+});
+
 test('portable data controls export and atomically import one tftpack without a Riot request', async () => {
   const [html, app] = await Promise.all([
     readFile(join(root, 'public', 'index.html'), 'utf8'),

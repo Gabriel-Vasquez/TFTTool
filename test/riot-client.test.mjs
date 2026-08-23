@@ -175,7 +175,7 @@ test('incremental sampling fetches only unseen match details and retains the new
   const fetched = [];
   const client = new RiotClient('test');
   client.challengerPlayers = async () => [{ puuid: 'player-1', tier: 'CHALLENGER', leaguePoints: 1000 }];
-  client.matchIds = async () => ['new', 'known'];
+  client.matchIds = async (region, puuid, options) => { assert.equal(options.count, 100); return ['new', 'known']; };
   client.match = async (region, id) => {
     fetched.push(id);
     return { metadata: { match_id: id }, info: { queue_id: 1100, game_datetime: now, game_version: '16.16.1', participants: [{ puuid: 'player-1', placement: 1, traits: [], units: [], augments: [] }] } };
@@ -196,6 +196,19 @@ test('incremental sampling performs no detail fetch when every listed match is a
 
   const observations = await client.sampleRegion('EUW', { target: 1, resume: { observations: [existing], incremental: true, scanLimit: 1 } });
   assert.equal(observations[0].id, existing.id);
+});
+
+test('incremental sampling merges new boards and drops only the oldest retained boards per region', async () => {
+  const now = Date.now();
+  const old = { id: 'old:player-1', matchId: 'old', playerId: 'player-1', region: 'EUW', recordedAt: new Date(now - 120_000).toISOString(), patch: '16.16', placement: 8, units: [], traits: [], augments: [] };
+  const recent = { id: 'recent:player-1', matchId: 'recent', playerId: 'player-1', region: 'EUW', recordedAt: new Date(now - 60_000).toISOString(), patch: '16.16', placement: 4, units: [], traits: [], augments: [] };
+  const client = new RiotClient('test');
+  client.challengerPlayers = async () => [{ puuid: 'player-1', tier: 'CHALLENGER', leaguePoints: 1000 }];
+  client.matchIds = async (region, puuid, options) => { assert.equal(options.count, 100); return ['new']; };
+  client.match = async () => ({ metadata: { match_id: 'new' }, info: { queue_id: 1100, game_datetime: now, game_version: '16.16.1', participants: [{ puuid: 'player-1', placement: 1, traits: [], units: [], augments: [] }] } });
+
+  const observations = await client.sampleRegion('EUW', { target: 2, resume: { observations: [old, recent], incremental: true, scanLimit: 1 } });
+  assert.deepEqual(observations.map((entry) => entry.matchId), ['new', 'recent']);
 });
 
 test('a forbidden endpoint after successful authentication is not mislabeled as an invalid key', async () => {

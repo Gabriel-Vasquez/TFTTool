@@ -9,6 +9,7 @@ export const ELITE_TIERS = Object.freeze(['CHALLENGER', 'GRANDMASTER', 'MASTER']
 // pressure when NA/BR/LAN/LAS are collected together.
 const DISCOVERY_BATCH_SIZE = 40;
 const MATCH_IDS_PER_PLAYER = 20;
+const INCREMENTAL_MATCH_IDS_PER_PLAYER = 100;
 const DEFAULT_INCREMENTAL_SCAN_LIMIT = 40;
 const MAX_CONCURRENT_REQUESTS_PER_ROUTE = 8;
 const tierPriority = (tier) => ELITE_TIERS.indexOf(String(tier || '').toUpperCase());
@@ -135,6 +136,8 @@ export class RiotClient {
       }), resume.currentPatch, target);
     }
     const observationIds = new Set(observations.map((observation) => observation.id));
+    const retainedObservationIds = new Set(observationIds);
+    const newObservationIds = new Set();
     const processedMatchPriority = new Map();
     for (const observation of observations) {
       if (!observation.matchId) continue;
@@ -147,6 +150,13 @@ export class RiotClient {
     let playersScanned = resume.playersScanned || 0;
     const baselinePatch = observations[0]?.patch || resume.currentPatch || null;
     let currentPatch = incremental && playersScanned === 0 ? null : resume.currentPatch || baselinePatch;
+    const report = (progress) => this.onProgress({
+      region,
+      observations: observations.length,
+      newObservations: newObservationIds.size,
+      target,
+      ...progress
+    });
 
     const appendMatch = (match, maximumPriority) => {
       if (!isCurrentRankedMatch(match, Date.now(), MAX_SAMPLE_AGE_DAYS)) return;
@@ -158,7 +168,11 @@ export class RiotClient {
         const ranked = playerByPuuid.get(participant.puuid);
         const observation = normalizeParticipant(match, participant, region, ranked);
         currentPatch ||= observation.patch;
-        if (observation.patch === currentPatch && !observationIds.has(observation.id)) { observations.push(observation); observationIds.add(observation.id); }
+        if (observation.patch === currentPatch && !observationIds.has(observation.id)) {
+          observations.push(observation);
+          observationIds.add(observation.id);
+          if (!retainedObservationIds.has(observation.id)) newObservationIds.add(observation.id);
+        }
         if (!incremental && observations.length >= target) break;
       }
     };
@@ -191,7 +205,7 @@ export class RiotClient {
             const discoveryPlayers = players.slice(playersScanned, discoveryEnd);
             playersScanned = discoveryEnd;
             const discovered = await mapConcurrent(discoveryPlayers, this.maxConcurrentRequestsPerRoute, async (player, index) => {
-              this.onProgress({ region, stage: 'discovering', playersScanned: discoveryEnd - discoveryPlayers.length + index + 1, observations: observations.length, tier: ELITE_TIERS[phase.priority] });
+              report({ region, stage: 'discovering', playersScanned: discoveryEnd - discoveryPlayers.length + index + 1, tier: ELITE_TIERS[phase.priority], progressPercent: Math.min(35, Math.round(((discoveryEnd - discoveryPlayers.length + index + 1) / Math.max(players.length, 1)) * 35)) });
               return player.puuid ? this.matchIds(region, player.puuid, { startTime: oldestStartTime, count: MATCH_IDS_PER_PLAYER }) : [];
             });
             for (const ids of discovered) for (const id of ids) if ((processedMatchPriority.get(id) ?? -1) < phase.priority) candidates.set(id, (candidates.get(id) || 0) + 1);
@@ -208,7 +222,7 @@ export class RiotClient {
             candidateOffset += candidateBatch.length;
             const matches = await mapConcurrent(candidateBatch, this.maxConcurrentRequestsPerRoute, async (id, index) => {
               const matchesScanned = scannedStart + index + 1;
-              this.onProgress({ region, stage: 'scanning', playersScanned, matchesScanned, candidateMatches: orderedCandidates.length, observations: observations.length, tier: ELITE_TIERS[phase.priority] });
+              report({ stage: 'scanning', playersScanned, matchesScanned, candidateMatches: orderedCandidates.length, tier: ELITE_TIERS[phase.priority], progressPercent: Math.min(99, 35 + Math.round((matchesScanned / Math.max(orderedCandidates.length, 1)) * 60)) });
               return (processedMatchPriority.get(id) ?? -1) >= phase.priority ? null : this.match(region, id);
             });
             for (let index = 0; index < candidateBatch.length && observations.length < target; index += 1) {
@@ -229,7 +243,7 @@ export class RiotClient {
       currentPatch ||= baselinePatch;
       observations = retainCurrentSample(observations, currentPatch, target);
       await checkpoint({ observations, playersScanned, currentPatch, completed: true, incremental: false, scanLimit });
-      this.onProgress({ region, stage: 'complete', playersScanned, observations: observations.length });
+      report({ stage: 'complete', playersScanned, progressPercent: 100 });
       return observations;
     }
 
@@ -238,8 +252,8 @@ export class RiotClient {
       const scanPlayers = players.slice(playersScanned, scanEnd);
       playersScanned = scanEnd;
       const listed = await mapConcurrent(scanPlayers, this.maxConcurrentRequestsPerRoute, async (player, index) => {
-        this.onProgress({ region, stage: 'scanning', playersScanned: scanEnd - scanPlayers.length + index + 1, observations: observations.length });
-        return { player, ids: player.puuid ? await this.matchIds(region, player.puuid, { startTime: incrementalStartTime, count: MATCH_IDS_PER_PLAYER }) : [] };
+        report({ stage: 'scanning', playersScanned: scanEnd - scanPlayers.length + index + 1, progressPercent: Math.round(((scanEnd - scanPlayers.length + index + 1) / Math.max(scanLimit, 1)) * 45) });
+        return { player, ids: player.puuid ? await this.matchIds(region, player.puuid, { startTime: incrementalStartTime, count: INCREMENTAL_MATCH_IDS_PER_PLAYER }) : [] };
       });
       const candidates = new Map();
       for (const { player, ids } of listed) {
@@ -256,6 +270,7 @@ export class RiotClient {
           processedMatchPriority.set(id, priority);
           appendMatch(matches[index], priority);
         }
+        report({ stage: 'scanning', playersScanned, matchesScanned: Math.min(offset + candidateBatch.length, orderedCandidates.length), candidateMatches: orderedCandidates.length, progressPercent: 45 + Math.round((Math.min(offset + candidateBatch.length, orderedCandidates.length) / Math.max(orderedCandidates.length, 1)) * 55) });
       }
       observations = retainCurrentSample(observations, currentPatch || baselinePatch, target);
       await checkpoint({ observations, playersScanned, currentPatch: currentPatch || baselinePatch, completed: false, incremental, scanLimit });
@@ -264,11 +279,11 @@ export class RiotClient {
     currentPatch ||= baselinePatch;
     observations = retainCurrentSample(observations, currentPatch, target);
     if (incremental && baselinePatch && discoveredPatch && discoveredPatch !== baselinePatch) {
-      this.onProgress({ region, stage: 'new_patch', playersScanned, observations: observations.length });
+      report({ stage: 'new_patch', playersScanned, progressPercent: 100 });
       return this.sampleRegion(region, { target, checkpoint, resume: { observations: [], playersScanned: 0, incremental: false } });
     }
     await checkpoint({ observations, playersScanned, currentPatch, completed: true, incremental, scanLimit });
-    this.onProgress({ region, stage: 'complete', playersScanned, observations: observations.length });
+    report({ stage: 'complete', playersScanned, progressPercent: 100 });
     return observations;
   }
 
@@ -277,7 +292,7 @@ export class RiotClient {
     const observations = (await Promise.all(groups.map(async (routing) => {
       const groupObservations = await Promise.all(regions.filter((candidate) => REGIONS[candidate].routing === routing).map(async (region) => {
         const saved = resume[region] || {};
-        if (saved.completed && saved.observations?.length >= target) { this.onProgress({ region, stage: 'complete', playersScanned: saved.playersScanned, observations: saved.observations.length }); return saved.observations; }
+        if (saved.completed && saved.observations?.length >= target) { this.onProgress({ region, stage: 'complete', playersScanned: saved.playersScanned, observations: saved.observations.length, newObservations: 0, target, progressPercent: 100 }); return saved.observations; }
         return this.sampleRegion(region, { target, resume: saved, checkpoint: async (state) => onCheckpoint(region, state) });
       }));
       return groupObservations.flat();

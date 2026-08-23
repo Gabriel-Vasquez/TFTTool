@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { REGIONS, TARGET_OBSERVATIONS_PER_REGION } from '../config.mjs';
 
@@ -33,6 +33,7 @@ export class LocalStore {
   constructor(directory, { renameImpl = rename, pauseImpl = pause } = {}) {
     this.directory = directory;
     this.file = join(directory, 'state.json');
+    this.refreshCheckpointFile = join(directory, 'refresh-checkpoint.json');
     this.state = { version: 11, settings: { language: 'es', layout: 'standard' }, favorites: [], snapshots: [], portableMetadata: {}, refreshCheckpoint: null, bundledSnapshotIds: [], bundledSnapshotHashes: {} };
     this.saveQueue = Promise.resolve();
     this.renameFile = renameImpl;
@@ -42,24 +43,31 @@ export class LocalStore {
   async load() {
     await mkdir(this.directory, { recursive: true });
     try { const saved = JSON.parse(await readFile(this.file, 'utf8')); const favorites = [...new Map((saved.favorites || []).flatMap((favorite) => { try { const normalized = normalizeFavorite(favorite); return [[favoriteKey(normalized), normalized]]; } catch { return []; } })).values()].sort((left, right) => favoriteKey(left).localeCompare(favoriteKey(right))); this.state = { ...this.state, ...saved, settings: { ...this.state.settings, ...(saved.settings || {}) }, favorites, bundledSnapshotHashes: { ...this.state.bundledSnapshotHashes, ...(saved.bundledSnapshotHashes || {}) } }; } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    try { this.state.refreshCheckpoint = JSON.parse(await readFile(this.refreshCheckpointFile, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
     return this.state;
   }
 
-  async save() {
-    const operation = this.saveQueue.catch(() => {}).then(async () => {
-      const temporary = `${this.file}.tmp`;
-      await writeFile(temporary, JSON.stringify(this.state), 'utf8');
-      for (let attempt = 0; ; attempt += 1) {
-        try { await this.renameFile(temporary, this.file); break; }
-        catch (error) {
-          if (!['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt >= 5) throw error;
-          await this.pause(25 * 2 ** attempt);
-        }
+  async writeAtomic(file, value) {
+    const temporary = `${file}.tmp`;
+    await writeFile(temporary, JSON.stringify(value), 'utf8');
+    for (let attempt = 0; ; attempt += 1) {
+      try { await this.renameFile(temporary, file); break; }
+      catch (error) {
+        if (!['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt >= 5) throw error;
+        await this.pause(25 * 2 ** attempt);
       }
+    }
+  }
+
+  async enqueueSave(action) {
+    const operation = this.saveQueue.catch(() => {}).then(async () => {
+      await action();
     });
     this.saveQueue = operation;
     await operation;
   }
+
+  async save() { await this.enqueueSave(() => this.writeAtomic(this.file, { ...this.state, refreshCheckpoint: null })); }
 
   async updateSettings(settings) { this.state.settings = { ...this.state.settings, ...settings }; await this.save(); return this.state.settings; }
   async setFavorite(value, active) {
@@ -134,6 +142,6 @@ export class LocalStore {
       observations: this.latestSnapshot()?.observations.length || 0
     };
   }
-  async saveRefreshCheckpoint(checkpoint) { this.state.refreshCheckpoint = checkpoint; await this.save(); }
-  async clearRefreshCheckpoint() { this.state.refreshCheckpoint = null; await this.save(); }
+  async saveRefreshCheckpoint(checkpoint) { this.state.refreshCheckpoint = checkpoint; await this.enqueueSave(() => this.writeAtomic(this.refreshCheckpointFile, checkpoint)); }
+  async clearRefreshCheckpoint() { this.state.refreshCheckpoint = null; await this.enqueueSave(() => rm(this.refreshCheckpointFile, { force: true })); }
 }
