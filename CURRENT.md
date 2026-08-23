@@ -12,9 +12,9 @@ All development and testing must run in the repository-owned isolated QA sandbox
 
 The first owner-facing in-place update must include the complete, freshly validated six-region real-data snapshot collected during QA so the product is ready for immediate use without another same-day refresh. Never discard that retrieved dataset. Import it only when newer than the owner's latest local snapshot, while preserving every existing historical snapshot, setting, and encrypted Riot key.
 
-- Phase: TFTTool 0.6.17 is being published on public `main` as a no-functional-change updater verification release; the owner's repaired installation remains on 0.6.16 until the owner initiates this test.
+- Phase: TFTTool 0.6.17 is published on public `main` as a no-functional-change updater verification release; the owner's repaired installation remains on 0.6.16 until the owner initiates this test.
 - Branch: `main`.
-- Published release: TFTTool `0.6.16` is available on public `main` with tag `v0.6.16`; `updates/stable.json` references the verified `TFTTool.Setup.0.6.16.exe` asset.
+- Published release: TFTTool `0.6.17` is available on public `main` with tag `v0.6.17`; `updates/stable.json` references the verified `TFTTool.Setup.0.6.17.exe` asset.
 - GitHub: public `Gabriel-Vasquez/TFTTool`.
 - Implemented and installed: official multi-region Riot ingestion, protected local key storage and invalid-key replacement, full baseline plus incremental diff refresh, deterministic current-set archetypes, real trait breakpoints, exact prevalence/raw-placement weighting, TFTactics-style champion/item presentation, flagship-relative variant diffs, Team Planner export codes, shared-lobby matchup and opponent-conditioned Counter Item analytics, evidence drill-downs, snapshot history/trends, portable `.tftpack` transfer, complete EN/ES UX, bounded rendering/search, secured standalone Electron window, local shutdown control, compressed bundled snapshot import, and NSIS in-place updating.
 - Owner-data baseline: TFTTool 0.6.1 is installed at `C:\Program Files\TFTTool`. The data directory, encrypted key availability, Spanish preference, snapshot identity, history, and all 12,000 observations remain preserved after the in-place migration.
