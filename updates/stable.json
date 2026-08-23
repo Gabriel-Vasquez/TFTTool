@@ -1,8 +1,8 @@
 {
   "channel": "stable",
-  "version": "0.6.21",
-  "publishedAt": "2026-08-23T08:44:27.274Z",
-  "installerUrl": "https://github.com/Gabriel-Vasquez/TFTTool/releases/download/v0.6.21/TFTTool.Setup.0.6.21.exe",
-  "size": 93887719,
-  "sha256": "6bc1df6c1cf36dff360ffa2dd81f0e0ec3800278248c86a321ff8b9bc89664ae"
+  "version": "0.6.22",
+  "publishedAt": "2026-08-23T09:31:02.601Z",
+  "installerUrl": "https://github.com/Gabriel-Vasquez/TFTTool/releases/download/v0.6.22/TFTTool.Setup.0.6.22.exe",
+  "size": 93887786,
+  "sha256": "d15a6afa37c18329afdd6361d6f0d1f78619ce07e2f3f70ffb62ff4b273ef6c8"
 }
