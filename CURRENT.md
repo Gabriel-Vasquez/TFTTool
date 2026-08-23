@@ -12,12 +12,12 @@ All development and testing must run in the repository-owned isolated QA sandbox
 
 The first owner-facing in-place update must include the complete, freshly validated six-region real-data snapshot collected during QA so the product is ready for immediate use without another same-day refresh. Never discard that retrieved dataset. Import it only when newer than the owner's latest local snapshot, while preserving every existing historical snapshot, setting, and encrypted Riot key.
 
-- Phase: TFTTool 0.6.26 is the deliberately no-functional-change release for a second real in-app update test from installed 0.6.25.
+- Phase: TFTTool 0.6.26 is published and the Windows in-app updater is accepted after a successful real 0.6.25-to-0.6.26 update.
 - Branch: `main`.
-- Published release: TFTTool `0.6.25` is public with the BOM repair. Version 0.6.26 will replace the stable channel after packaging.
+- Published release: TFTTool `0.6.26` is available on public `main` with tag `v0.6.26`; `updates/stable.json` references its verified release asset.
 - GitHub: public `Gabriel-Vasquez/TFTTool`.
 - Implemented and installed: official multi-region Riot ingestion, protected local key storage and invalid-key replacement, full baseline plus incremental diff refresh, deterministic current-set archetypes, real trait breakpoints, exact prevalence/raw-placement weighting, TFTactics-style champion/item presentation, flagship-relative variant diffs, Team Planner export codes, shared-lobby matchup and opponent-conditioned Counter Item analytics, evidence drill-downs, snapshot history/trends, portable `.tftpack` transfer, complete EN/ES UX, bounded rendering/search, secured standalone Electron window, local shutdown control, compressed bundled snapshot import, and NSIS in-place updating.
-- Owner-data baseline: TFTTool 0.6.1 is installed at `C:\Program Files\TFTTool`. The data directory, encrypted key availability, Spanish preference, snapshot identity, history, and all 12,000 observations remain preserved after the in-place migration.
+- Owner-data baseline: TFTTool 0.6.26 is installed at `C:\Program Files\TFTTool`. The complete owner state remains at SHA-256 `DA5DB1493A8CD7F1B99DA0AA10BB8FE97AB4DC1214B069ECBF05A8F0708DA2FA` with four snapshots, 24,000 current observations, Spanish preference, five favorites, history, and protected Riot-key availability preserved.
 - Refinement evidence: raw inspection of the preserved 12,000 observations found 7,457 repeated-item slot occurrences across 5,745 boards, including 441 Lulu and 129 Zoe cases. The implementation now keeps global item prevalence board-normalized while preserving repeated slots for composition-specific champion builds.
 - Current-set/current-patch selection is a reusable analysis boundary: when a new TFT set is observed, it is isolated and clustered again through the same deterministic archetype pipeline instead of inheriting old-set boards.
 - Portable `.tftpack` export/import, offline bilingual metadata, a full item-free flagship plus exactly three itemized CORE champions, composition-context champion analysis, symmetric variant diffs, and corrected slider direction are installed.
@@ -59,9 +59,8 @@ The first owner-facing in-place update must include the complete, freshly valida
 
 ## Next actions
 
-1. Publish the controlled no-functional-change 0.6.26 and execute the real in-app update from installed 0.6.25.
-2. Record installed version, helper status, automatic relaunch, and owner-data preservation before declaring acceptance.
-3. Future explicit data refreshes reuse the rolling five-day/current-patch sample and request only post-baseline match IDs plus unseen match details.
+1. Deliver future application releases through the now-accepted Settings update button and the controlled public stable manifest.
+2. Future explicit data refreshes reuse the rolling five-day/current-patch sample and request only post-baseline match IDs plus unseen match details.
 
 ## Blockers
 
@@ -75,6 +74,7 @@ The first owner-facing in-place update must include the complete, freshly valida
 ## Validation
 
 - TFTTool 0.6.26 is functionally identical to 0.6.25 and passes all 37 focused end-to-end, updater, executable PowerShell handoff/BOM, and UI-contract tests. Its 93,887,950-byte installer has SHA-256 `4A2DC98F75CCD7322AEF6E805C9F5279D126BDF04EB33315672A8433E23DBDD6`.
+- The real installed 0.6.25 client fetched the public 0.6.26 manifest, downloaded and verified exactly 93,887,950 bytes with SHA-256 `4A2DC98F75CCD7322AEF6E805C9F5279D126BDF04EB33315672A8433E23DBDD6`, then progressed automatically through helper states `ready`, `installing`, and `completed`. The exact Program Files installation became 0.6.26, automatically relaunched and served bootstrap 0.6.26, wrote BOM-free status beginning with `{`, retained all five favorites, and preserved the complete owner-state SHA-256 unchanged. The hidden QA instance was shut down after verification.
 - TFTTool 0.6.25 passes all 113 automated tests, including the executable Windows PowerShell BOM regression. Its 93,887,963-byte installer has SHA-256 `49619947CB6707FEB9CCBE28D613D9A2E0528A922DBC401E166280F1240AE141`. A real in-place repair installed 0.6.25 with exit code 0 while preserving the owner state at exact SHA-256 `DA5DB1493A8CD7F1B99DA0AA10BB8FE97AB4DC1214B069ECBF05A8F0708DA2FA`.
 - TFTTool 0.6.24 is functionally identical to 0.6.23 and passes all 37 focused end-to-end, updater, executable handoff, and UI-contract tests. Its 93,887,869-byte installer has SHA-256 `6D3059754508839F8AED53E6F3506E3C3B478BB243C400E83AFC583CDDF73B17`.
 - TFTTool 0.6.23 passes all 113 automated tests. Two executable PowerShell handoff tests prove that the actual encoded command preserves installer, helper, application, parent PID, and status-file values through paths containing spaces, and that the NSIS destination resolves exactly to `/S "/D=C:\Program Files\TFTTool"`. The packaged app starts successfully against an isolated 24,000-observation QA store. Its 93,887,843-byte installer has SHA-256 `3B1337FC0A0E0FC64DC23F8440F85E10863DA45D6552EDF339D91D37CCE1F5DF`. A real silent in-place installation changed `C:\Program Files\TFTTool` from 0.6.21 to 0.6.23 with exit code 0 while the complete owner state retained SHA-256 `DA5DB1493A8CD7F1B99DA0AA10BB8FE97AB4DC1214B069ECBF05A8F0708DA2FA`, four snapshots, 24,000 current observations, Spanish, and five favorites.
