@@ -12,9 +12,9 @@ All development and testing must run in the repository-owned isolated QA sandbox
 
 The first owner-facing in-place update must include the complete, freshly validated six-region real-data snapshot collected during QA so the product is ready for immediate use without another same-day refresh. Never discard that retrieved dataset. Import it only when newer than the owner's latest local snapshot, while preserving every existing historical snapshot, setting, and encrypted Riot key.
 
-- Phase: TFTTool 0.6.22 is in release QA as a deliberately no-functional-change updater test from the repaired 0.6.21 installation.
+- Phase: TFTTool 0.6.22 is published on public `main` as a deliberately no-functional-change updater test from the repaired 0.6.21 installation.
 - Branch: `main`.
-- Published release: TFTTool `0.6.21` is available on public `main` with tag `v0.6.21`; `0.6.22` will replace the stable manifest only after its installer and public asset checksum are verified.
+- Published release: TFTTool `0.6.22` is available on public `main` with tag `v0.6.22`; `updates/stable.json` references the verified `TFTTool.Setup.0.6.22.exe` asset.
 - GitHub: public `Gabriel-Vasquez/TFTTool`.
 - Implemented and installed: official multi-region Riot ingestion, protected local key storage and invalid-key replacement, full baseline plus incremental diff refresh, deterministic current-set archetypes, real trait breakpoints, exact prevalence/raw-placement weighting, TFTactics-style champion/item presentation, flagship-relative variant diffs, Team Planner export codes, shared-lobby matchup and opponent-conditioned Counter Item analytics, evidence drill-downs, snapshot history/trends, portable `.tftpack` transfer, complete EN/ES UX, bounded rendering/search, secured standalone Electron window, local shutdown control, compressed bundled snapshot import, and NSIS in-place updating.
 - Owner-data baseline: TFTTool 0.6.1 is installed at `C:\Program Files\TFTTool`. The data directory, encrypted key availability, Spanish preference, snapshot identity, history, and all 12,000 observations remain preserved after the in-place migration.
@@ -68,6 +68,7 @@ The first owner-facing in-place update must include the complete, freshly valida
 
 ## Validation
 
+- TFTTool 0.6.22 is intentionally functionally identical to 0.6.21 and passed 30 focused UI/updater contract tests before packaging. The published installer is 93,887,786 bytes with SHA-256 `D15A6AFA37C18329AFDD6361D6F0D1F78619CE07E2F3F70FFB62FF4B273EF6C8`.
 - TFTTool 0.6.21 passed 30 focused UI/updater contract tests, including the prohibition on executing `app.asar.unpacked` and the required staging of the current packaged helper. Public-channel QA confirms that a 0.6.20 client detects 0.6.21, downloads exactly 93,887,719 bytes, and reproduces SHA-256 `6BC1DF6C1CF36DFF360FFA2DD81F0E0EC3800278248C86A321FF8B9BC89664AE` from the GitHub release.
 - TFTTool 0.6.20 passed 30 focused UI/updater contract tests, including the `.progress.hidden` visual contract. Public-channel QA confirms that a 0.6.19 client detects 0.6.20, downloads exactly 93,887,757 bytes, and reproduces SHA-256 `1EE58096FCD94C11AE48855ECF0FA17A22929021A51602C430ED511BBB1B46F4` from the GitHub release.
 - TFTTool 0.6.19 is intentionally functionally identical to 0.6.18 and passed 30 focused UI/updater contract tests before packaging. Public-channel QA confirms that a 0.6.18 client detects 0.6.19, downloads exactly 93,887,589 bytes, and reproduces SHA-256 `C49108F8335B03B18FD967829A037D82376BBAEEE29E40F66A36312E249B5DBB` from the GitHub release.
