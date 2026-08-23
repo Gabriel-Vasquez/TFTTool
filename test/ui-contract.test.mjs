@@ -116,13 +116,19 @@ test('language switching requests official en-US or Spain Spanish metadata immed
   assert.match(app, /await load\(\)/);
 });
 
-test('Riot key save intercepts the dialog submit and persists before refresh', async () => {
-  const app = await readFile(join(root, 'public', 'app.js'), 'utf8');
+test('Riot key dialog is always closable and persists independently before refresh', async () => {
+  const [app, html] = await Promise.all([
+    readFile(join(root, 'public', 'app.js'), 'utf8'),
+    readFile(join(root, 'public', 'index.html'), 'utf8')
+  ]);
+  assert.match(html, /type="button" class="close" data-close-key/);
+  assert.match(app, /function closeKeyDialog/);
+  assert.match(app, /#key-dialog'\)\.addEventListener\('cancel'/);
   assert.match(app, /#key-form.*addEventListener\('submit'/);
   assert.match(app, /event\.preventDefault\(\)/);
   assert.match(app, /api\('\/api\/settings\/riot-key'.*method: 'PUT'/);
-  assert.match(app, /\$\('#key-dialog'\)\.close\(\)/);
-  assert.match(app, /api\('\/api\/refresh'.*method: 'POST'/);
+  assert.match(app, /closeKeyDialog\(\);\s*try \{ await startRefresh\(\); \}/);
+  assert.match(app, /function setKeySaving/);
 });
 
 test('portable data controls export and atomically import one tftpack without a Riot request', async () => {
@@ -153,7 +159,9 @@ test('settings opens as a floating dialog with a verified application updater', 
   assert.match(css, /\.app-shell \{ display:block;min-height:100vh;padding-left:230px/);
   assert.match(css, /\.sidebar \{ position:fixed;z-index:30;left:0;top:0;bottom:0;[^}]*height:100vh;overflow:hidden/);
   assert.match(css, /\.sidebar-bottom \{ flex:0 0 auto;margin-top:auto/);
-  assert.match(launcher, /spawn\(installer, \['\/S'\]/);
+  assert.match(launcher, /update-and-relaunch\.ps1/);
+  assert.match(launcher, /'-ParentProcessId', String\(process\.pid\)/);
+  assert.match(launcher, /spawn\('powershell\.exe'/);
 });
 
 test('one-star badges are muted while two-star badges are white and three-star badges remain prominent', async () => {

@@ -4,7 +4,13 @@ import { isCurrentRankedMatch, normalizeParticipant } from '../domain/normalizat
 const pause = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const observationTime = (observation) => Date.parse(observation.recordedAt) || 0;
 export const ELITE_TIERS = Object.freeze(['CHALLENGER', 'GRANDMASTER', 'MASTER']);
-const DISCOVERY_BATCH_SIZE = 100;
+// Riot returns match details one board at a time.  Keep a bounded, shared
+// request window per routing host so collection is fast without multiplying
+// pressure when NA/BR/LAN/LAS are collected together.
+const DISCOVERY_BATCH_SIZE = 40;
+const MATCH_IDS_PER_PLAYER = 20;
+const DEFAULT_INCREMENTAL_SCAN_LIMIT = 40;
+const MAX_CONCURRENT_REQUESTS_PER_ROUTE = 8;
 const tierPriority = (tier) => ELITE_TIERS.indexOf(String(tier || '').toUpperCase());
 const matchSequence = (id) => Number(String(id || '').match(/_(\d+)$/)?.[1]) || 0;
 const compareCandidateMatches = (left, right) => matchSequence(right[0]) - matchSequence(left[0]) || right[1] - left[1] || right[0].localeCompare(left[0]);
@@ -17,38 +23,81 @@ function retainCurrentSample(observations, patch, target, now = Date.now()) {
     .slice(0, target);
 }
 
+async function mapConcurrent(entries, limit, mapper) {
+  const results = new Array(entries.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(Math.max(1, limit), entries.length) }, async () => {
+    while (next < entries.length) {
+      const index = next;
+      next += 1;
+      results[index] = await mapper(entries[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 export class RiotClient {
-  constructor(apiKey, { onProgress = () => {}, fetchImpl = fetch, pauseImpl = pause, requestTimeout = 15_000 } = {}) {
+  constructor(apiKey, { onProgress = () => {}, fetchImpl = fetch, pauseImpl = pause, requestTimeout = 15_000, maxConcurrentRequestsPerRoute = MAX_CONCURRENT_REQUESTS_PER_ROUTE } = {}) {
     this.apiKey = apiKey;
     this.onProgress = onProgress;
     this.fetch = fetchImpl;
     this.pause = pauseImpl;
     this.requestTimeout = requestTimeout;
+    this.maxConcurrentRequestsPerRoute = Math.max(1, maxConcurrentRequestsPerRoute);
     this.matches = new Map();
     this.authenticated = false;
+    this.routes = new Map();
+  }
+
+  routeState(url) {
+    const key = new URL(url).origin;
+    if (!this.routes.has(key)) this.routes.set(key, { active: 0, waiting: [], cooldownUntil: 0 });
+    return this.routes.get(key);
+  }
+
+  async withRouteSlot(url, action) {
+    const state = this.routeState(url);
+    if (state.active >= this.maxConcurrentRequestsPerRoute) await new Promise((resolve) => state.waiting.push(resolve));
+    state.active += 1;
+    try { return await action(state); }
+    finally {
+      state.active -= 1;
+      state.waiting.shift()?.();
+    }
   }
 
   async request(url, attempts = 4, progressRegion = this.activeRegion) {
-    for (let attempt = 0; attempt < attempts; attempt += 1) {
-      let response;
-      try { response = await this.fetch(url, { headers: { 'X-Riot-Token': this.apiKey }, signal: AbortSignal.timeout(this.requestTimeout) }); }
-      catch (error) {
-        if (attempt === attempts - 1) throw new Error(`Riot API network request failed after retries: ${error.message}`);
-        const retryIn = 500 * 2 ** attempt;
-        this.onProgress({ region: progressRegion, stage: 'retry', retryIn, retryUntil: Date.now() + retryIn });
+    return this.withRouteSlot(url, async (route) => {
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        const cooldown = Math.max(0, route.cooldownUntil - Date.now());
+        if (cooldown) {
+          this.onProgress({ region: progressRegion, stage: 'rate_limit', retryIn: cooldown, retryUntil: route.cooldownUntil });
+          await this.pause(cooldown);
+        }
+        let response;
+        try { response = await this.fetch(url, { headers: { 'X-Riot-Token': this.apiKey }, signal: AbortSignal.timeout(this.requestTimeout) }); }
+        catch (error) {
+          if (attempt === attempts - 1) throw new Error(`Riot API network request failed after retries: ${error.message}`);
+          const retryIn = 500 * 2 ** attempt;
+          this.onProgress({ region: progressRegion, stage: 'retry', retryIn, retryUntil: Date.now() + retryIn });
+          await this.pause(retryIn);
+          continue;
+        }
+        if (response.ok) { this.authenticated = true; return response.json(); }
+        if (response.status === 401 || (response.status === 403 && !this.authenticated)) throw new Error('RIOT_API_KEY_INVALID');
+        if (response.status === 403) throw new Error('RIOT_API_FORBIDDEN');
+        const retryAfter = Number(response.headers.get('retry-after') || 0);
+        if (response.status !== 429 && response.status < 500) throw new Error(`Riot API request failed (${response.status}).`);
+        const retryIn = Math.max(retryAfter * 1_000, 500 * 2 ** attempt);
+        if (response.status === 429) {
+          route.cooldownUntil = Math.max(route.cooldownUntil, Date.now() + retryIn);
+          this.onProgress({ region: progressRegion, stage: 'rate_limit', retryIn, retryUntil: route.cooldownUntil });
+        }
         await this.pause(retryIn);
-        continue;
       }
-      if (response.ok) { this.authenticated = true; return response.json(); }
-      if (response.status === 401 || (response.status === 403 && !this.authenticated)) throw new Error('RIOT_API_KEY_INVALID');
-      if (response.status === 403) throw new Error('RIOT_API_FORBIDDEN');
-      const retryAfter = Number(response.headers.get('retry-after') || 0);
-      if (response.status !== 429 && response.status < 500) throw new Error(`Riot API request failed (${response.status}).`);
-      const retryIn = Math.max(retryAfter * 1_000, 500 * 2 ** attempt);
-      if (response.status === 429) this.onProgress({ region: progressRegion, stage: 'rate_limit', retryIn, retryUntil: Date.now() + retryIn });
-      await this.pause(retryIn);
-    }
-    throw new Error('Riot API request failed after retries.');
+      throw new Error('Riot API request failed after retries.');
+    });
   }
 
   platformUrl(region, path) { return `https://${REGIONS[region].platform}.api.riotgames.com${path}`; }
@@ -93,7 +142,7 @@ export class RiotClient {
       processedMatchPriority.set(observation.matchId, Math.max(processedMatchPriority.get(observation.matchId) ?? -1, priority >= 0 ? priority : ELITE_TIERS.length - 1));
     }
     const incremental = resume.incremental === true;
-    const scanLimit = incremental ? Math.min(players.length, Math.max(1, resume.scanLimit || 100)) : players.length;
+    const scanLimit = incremental ? Math.min(players.length, Math.max(1, resume.scanLimit || DEFAULT_INCREMENTAL_SCAN_LIMIT)) : players.length;
     const incrementalStartTime = incremental && observations.length ? Math.floor(Math.max(...observations.map(observationTime)) / 1_000) - 60 : null;
     let playersScanned = resume.playersScanned || 0;
     const baselinePatch = observations[0]?.patch || resume.currentPatch || null;
@@ -139,29 +188,37 @@ export class RiotClient {
             candidates = new Map();
             candidateOffset = 0;
             const discoveryEnd = Math.min(phase.end, playersScanned + DISCOVERY_BATCH_SIZE);
-            for (let index = playersScanned; index < discoveryEnd; index += 1) {
-              const player = players[index];
-              playersScanned = index + 1;
-              this.onProgress({ region, stage: 'discovering', playersScanned, observations: observations.length, tier: ELITE_TIERS[phase.priority] });
-              if (!player.puuid) continue;
-              const ids = await this.matchIds(region, player.puuid, { startTime: oldestStartTime, count: 100 });
-              for (const id of ids) if ((processedMatchPriority.get(id) ?? -1) < phase.priority) candidates.set(id, (candidates.get(id) || 0) + 1);
-              if (playersScanned % 50 === 0) await checkpoint({ observations, playersScanned, currentPatch: currentPatch || baselinePatch, completed: false, incremental: false, scanLimit, phasePriority: phase.priority, candidateMatches: [...candidates], candidateOffset: 0 });
-            }
+            const discoveryPlayers = players.slice(playersScanned, discoveryEnd);
+            playersScanned = discoveryEnd;
+            const discovered = await mapConcurrent(discoveryPlayers, this.maxConcurrentRequestsPerRoute, async (player, index) => {
+              this.onProgress({ region, stage: 'discovering', playersScanned: discoveryEnd - discoveryPlayers.length + index + 1, observations: observations.length, tier: ELITE_TIERS[phase.priority] });
+              return player.puuid ? this.matchIds(region, player.puuid, { startTime: oldestStartTime, count: MATCH_IDS_PER_PLAYER }) : [];
+            });
+            for (const ids of discovered) for (const id of ids) if ((processedMatchPriority.get(id) ?? -1) < phase.priority) candidates.set(id, (candidates.get(id) || 0) + 1);
+            if (playersScanned % 50 === 0 || playersScanned === phase.end) await checkpoint({ observations, playersScanned, currentPatch: currentPatch || baselinePatch, completed: false, incremental: false, scanLimit, phasePriority: phase.priority, candidateMatches: [...candidates], candidateOffset: 0 });
             candidates = new Map([...candidates].sort(compareCandidateMatches));
             await checkpoint({ observations, playersScanned, currentPatch: currentPatch || baselinePatch, completed: false, incremental: false, scanLimit, phasePriority: phase.priority, candidateMatches: [...candidates], candidateOffset });
             if (!candidates.size) continue;
           }
           const orderedCandidates = [...candidates.keys()];
-          for (let index = candidateOffset; index < orderedCandidates.length && observations.length < target; index += 1) {
-            candidateOffset = index + 1;
-            const id = orderedCandidates[index];
-            if ((processedMatchPriority.get(id) ?? -1) >= phase.priority) continue;
-            this.onProgress({ region, stage: 'scanning', playersScanned, matchesScanned: candidateOffset, candidateMatches: orderedCandidates.length, observations: observations.length, tier: ELITE_TIERS[phase.priority] });
-            const match = await this.match(region, id);
-            processedMatchPriority.set(id, phase.priority);
-            appendMatch(match, phase.priority);
-            if (candidateOffset % 50 === 0) {
+          while (candidateOffset < orderedCandidates.length && observations.length < target) {
+            const remainingNeeded = Math.max(1, target - observations.length);
+            const candidateBatch = orderedCandidates.slice(candidateOffset, candidateOffset + Math.min(this.maxConcurrentRequestsPerRoute, remainingNeeded));
+            const scannedStart = candidateOffset;
+            candidateOffset += candidateBatch.length;
+            const matches = await mapConcurrent(candidateBatch, this.maxConcurrentRequestsPerRoute, async (id, index) => {
+              const matchesScanned = scannedStart + index + 1;
+              this.onProgress({ region, stage: 'scanning', playersScanned, matchesScanned, candidateMatches: orderedCandidates.length, observations: observations.length, tier: ELITE_TIERS[phase.priority] });
+              return (processedMatchPriority.get(id) ?? -1) >= phase.priority ? null : this.match(region, id);
+            });
+            for (let index = 0; index < candidateBatch.length && observations.length < target; index += 1) {
+              const id = candidateBatch[index];
+              const match = matches[index];
+              if (!match) continue;
+              processedMatchPriority.set(id, phase.priority);
+              appendMatch(match, phase.priority);
+            }
+            if (candidateOffset % 50 === 0 || candidateOffset === orderedCandidates.length) {
               observations = retainCurrentSample(observations, currentPatch || baselinePatch, target);
               await checkpoint({ observations, playersScanned, currentPatch: currentPatch || baselinePatch, completed: false, incremental: false, scanLimit, phasePriority: phase.priority, candidateMatches: [...candidates], candidateOffset });
             }
@@ -176,27 +233,40 @@ export class RiotClient {
       return observations;
     }
 
-    for (let index = playersScanned; index < scanLimit && (incremental || observations.length < target); index += 1) {
-      const player = players[index];
-      playersScanned = index + 1;
-      this.onProgress({ region, stage: 'scanning', playersScanned, observations: observations.length });
-      const puuid = player.puuid;
-      if (!puuid) continue;
-      const ids = await this.matchIds(region, puuid, incremental ? { startTime: incrementalStartTime, count: 100 } : undefined);
-      for (const id of ids) {
-        const currentPriority = Math.max(tierPriority(player.tier), tierPriority('GRANDMASTER'));
-        if ((processedMatchPriority.get(id) ?? -1) >= currentPriority) continue;
-        const match = await this.match(region, id);
-        processedMatchPriority.set(id, currentPriority);
-        appendMatch(match, currentPriority);
+    while (playersScanned < scanLimit && (incremental || observations.length < target)) {
+      const scanEnd = Math.min(scanLimit, playersScanned + DISCOVERY_BATCH_SIZE);
+      const scanPlayers = players.slice(playersScanned, scanEnd);
+      playersScanned = scanEnd;
+      const listed = await mapConcurrent(scanPlayers, this.maxConcurrentRequestsPerRoute, async (player, index) => {
+        this.onProgress({ region, stage: 'scanning', playersScanned: scanEnd - scanPlayers.length + index + 1, observations: observations.length });
+        return { player, ids: player.puuid ? await this.matchIds(region, player.puuid, { startTime: incrementalStartTime, count: MATCH_IDS_PER_PLAYER }) : [] };
+      });
+      const candidates = new Map();
+      for (const { player, ids } of listed) {
+        const priority = Math.max(tierPriority(player.tier), tierPriority('GRANDMASTER'));
+        for (const id of ids) if ((processedMatchPriority.get(id) ?? -1) < priority) candidates.set(id, Math.min(candidates.get(id) ?? priority, priority));
       }
-      if (playersScanned % 5 === 0) {
-        observations = retainCurrentSample(observations, currentPatch || baselinePatch, target);
-        await checkpoint({ observations, playersScanned, currentPatch: currentPatch || baselinePatch, completed: false, incremental, scanLimit });
+      const orderedCandidates = [...candidates.keys()].sort((left, right) => matchSequence(right) - matchSequence(left) || left.localeCompare(right));
+      for (let offset = 0; offset < orderedCandidates.length; offset += this.maxConcurrentRequestsPerRoute) {
+        const candidateBatch = orderedCandidates.slice(offset, offset + this.maxConcurrentRequestsPerRoute);
+        const matches = await mapConcurrent(candidateBatch, this.maxConcurrentRequestsPerRoute, (id) => this.match(region, id));
+        for (let index = 0; index < candidateBatch.length; index += 1) {
+          const id = candidateBatch[index];
+          const priority = candidates.get(id);
+          processedMatchPriority.set(id, priority);
+          appendMatch(matches[index], priority);
+        }
       }
+      observations = retainCurrentSample(observations, currentPatch || baselinePatch, target);
+      await checkpoint({ observations, playersScanned, currentPatch: currentPatch || baselinePatch, completed: false, incremental, scanLimit });
     }
+    const discoveredPatch = currentPatch;
     currentPatch ||= baselinePatch;
     observations = retainCurrentSample(observations, currentPatch, target);
+    if (incremental && baselinePatch && discoveredPatch && discoveredPatch !== baselinePatch) {
+      this.onProgress({ region, stage: 'new_patch', playersScanned, observations: observations.length });
+      return this.sampleRegion(region, { target, checkpoint, resume: { observations: [], playersScanned: 0, incremental: false } });
+    }
     await checkpoint({ observations, playersScanned, currentPatch, completed: true, incremental, scanLimit });
     this.onProgress({ region, stage: 'complete', playersScanned, observations: observations.length });
     return observations;
@@ -205,13 +275,12 @@ export class RiotClient {
   async sampleAll({ onCheckpoint = () => {}, target = TARGET_OBSERVATIONS_PER_REGION, regions = Object.keys(REGIONS), resume = {} } = {}) {
     const groups = [...new Set(regions.map((region) => REGIONS[region].routing))];
     const observations = (await Promise.all(groups.map(async (routing) => {
-      const groupObservations = [];
-      for (const region of regions.filter((candidate) => REGIONS[candidate].routing === routing)) {
+      const groupObservations = await Promise.all(regions.filter((candidate) => REGIONS[candidate].routing === routing).map(async (region) => {
         const saved = resume[region] || {};
-        if (saved.completed && saved.observations?.length >= target) { groupObservations.push(...saved.observations); this.onProgress({ region, stage: 'complete', playersScanned: saved.playersScanned, observations: saved.observations.length }); continue; }
-        groupObservations.push(...await this.sampleRegion(region, { target, resume: saved, checkpoint: async (state) => onCheckpoint(region, state) }));
-      }
-      return groupObservations;
+        if (saved.completed && saved.observations?.length >= target) { this.onProgress({ region, stage: 'complete', playersScanned: saved.playersScanned, observations: saved.observations.length }); return saved.observations; }
+        return this.sampleRegion(region, { target, resume: saved, checkpoint: async (state) => onCheckpoint(region, state) });
+      }));
+      return groupObservations.flat();
     }))).flat();
     if (!observations.length) return observations;
     const currentPatch = observations.reduce((newest, item) => item.recordedAt > newest.recordedAt ? item : newest).patch;

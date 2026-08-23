@@ -40,7 +40,10 @@ async function launch() {
   const started = await startTftServer(port, {
     onShutdown: () => app.quit(),
     onInstallUpdate: async (installer) => {
-      const update = spawn(installer, ['/S'], { detached: true, stdio: 'ignore', windowsHide: true });
+      const relauncher = app.isPackaged
+        ? join(process.resourcesPath, 'app.asar.unpacked', 'src', 'update-and-relaunch.ps1')
+        : join(__dirname, '..', 'src', 'update-and-relaunch.ps1');
+      const update = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', relauncher, '-Installer', installer, '-Application', process.execPath, '-ParentProcessId', String(process.pid)], { detached: true, stdio: 'ignore', windowsHide: true });
       update.unref();
       setTimeout(() => app.quit(), 250);
     }

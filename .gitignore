@@ -4,3 +4,4 @@ dist/
 state.json
 .qa-data/
 .qa-*/
+.qa/

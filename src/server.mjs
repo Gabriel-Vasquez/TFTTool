@@ -68,9 +68,9 @@ async function refresh() {
     const latest = store.latestSnapshot();
     const provenanceCompatible = Boolean(latest)
       && latest.collection?.targetPerRegion === REFRESH_TARGET_PER_REGION
-      && latest.observations.every((observation) => ['CHALLENGER', 'GRANDMASTER', 'MASTER'].includes(observation.sourceTier));
+      && latest.observations.every((observation) => ['CHALLENGER', 'GRANDMASTER', 'MASTER'].includes(observation.sourceTier))
+      && hasCompleteRegionalCoverage(latest, Object.keys(REGIONS), REFRESH_TARGET_PER_REGION);
     const incrementalRegions = Object.fromEntries(Object.keys(REGIONS).map((region) => {
-      const priorProgress = latest?.collection?.regions?.[region];
       return [region, {
         observations: latest ? latest.observations.filter((observation) => observation.region === region) : [],
         playersScanned: 0,
@@ -78,13 +78,16 @@ async function refresh() {
         completed: false,
         incremental: provenanceCompatible,
         rankBackfill: Boolean(latest) && !provenanceCompatible,
-        scanLimit: Math.max(25, priorProgress?.playersScanned || 25)
+        // A normal update is a diff: retained, complete regional evidence is
+        // already sufficient.  Revalidate a bounded elite window for new IDs
+        // instead of replaying every player used to create the baseline.
+        scanLimit: 40
       }];
     }));
     const checkpointCompatible = checkpointAge <= 6 * 60 * 60 * 1_000
       && savedCheckpoint?.targetPerRegion === REFRESH_TARGET_PER_REGION
-      && savedCheckpoint?.provenanceVersion === 3;
-    const checkpoint = checkpointCompatible ? savedCheckpoint : { startedAt: job.startedAt, targetPerRegion: REFRESH_TARGET_PER_REGION, provenanceVersion: 3, regions: incrementalRegions };
+      && savedCheckpoint?.provenanceVersion === 4;
+    const checkpoint = checkpointCompatible ? savedCheckpoint : { startedAt: job.startedAt, targetPerRegion: REFRESH_TARGET_PER_REGION, provenanceVersion: 4, regions: incrementalRegions };
     const collectedObservations = await client.sampleAll({
       target: REFRESH_TARGET_PER_REGION,
       resume: checkpoint.regions,

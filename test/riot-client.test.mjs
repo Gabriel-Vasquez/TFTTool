@@ -65,7 +65,7 @@ test('sampler exhausts Challenger and Grandmaster evidence before admitting Mast
   assert.deepEqual(scanned, ['challenger', 'grandmaster', 'master']);
 });
 
-test('full sampling analyzes deterministic elite batches before discovering more players', async () => {
+test('full sampling analyzes a bounded deterministic elite batch before discovering more players', async () => {
   const players = Array.from({ length: 101 }, (_, index) => ({ puuid: `elite-${index}`, tier: 'GRANDMASTER', leaguePoints: 900 - index }));
   const listed = [];
   const client = new RiotClient('test');
@@ -78,8 +78,34 @@ test('full sampling analyzes deterministic elite batches before discovering more
 
   const observations = await client.sampleRegion('EUW', { target: 1 });
   assert.equal(observations.length, 1);
-  assert.equal(listed.length, 100);
+  assert.equal(listed.length, 40);
   assert.equal(listed.includes('elite-100'), false);
+});
+
+test('full sampling parallelizes bounded match-list and match-detail work while preserving deterministic results', async () => {
+  const players = Array.from({ length: 8 }, (_, index) => ({ puuid: `elite-${index}`, tier: 'GRANDMASTER', leaguePoints: 900 - index }));
+  let listingActive = 0; let listingPeak = 0; let detailActive = 0; let detailPeak = 0;
+  const client = new RiotClient('test', { maxConcurrentRequestsPerRoute: 4 });
+  client.challengerPlayers = async () => players;
+  client.matchIds = async (region, puuid) => {
+    listingActive += 1; listingPeak = Math.max(listingPeak, listingActive);
+    await new Promise((resolve) => setTimeout(resolve, 8));
+    listingActive -= 1;
+    return [`EUW1_${puuid}`];
+  };
+  client.match = async (region, id) => {
+    detailActive += 1; detailPeak = Math.max(detailPeak, detailActive);
+    await new Promise((resolve) => setTimeout(resolve, 8));
+    detailActive -= 1;
+    const player = id.replace('EUW1_', '');
+    return { metadata: { match_id: id }, info: { queue_id: 1100, game_datetime: Date.now(), game_version: '16.16.1', participants: [{ puuid: player, placement: 1, traits: [], units: [], augments: [] }] } };
+  };
+
+  const observations = await client.sampleRegion('EUW', { target: 8 });
+  assert.equal(observations.length, 8);
+  assert.equal(listingPeak, 4);
+  assert.equal(detailPeak, 4);
+  assert.deepEqual(observations.map((item) => item.playerId), players.map((item) => item.puuid));
 });
 
 test('resumed sampling recency-sorts only the unprocessed candidate tail', async () => {
@@ -225,7 +251,7 @@ test('intermittent network failures retry with backoff and recover', async () =>
   assert.deepEqual(waits, [500]);
 });
 
-test('regional sampling runs routing groups concurrently but serializes shared routing clusters', async () => {
+test('regional sampling runs all regions concurrently while the request gate protects shared routing clusters', async () => {
   const client = new RiotClient('test');
   let active = 0; let maxActive = 0; let americasActive = 0; let maxAmericasActive = 0;
   client.sampleRegion = async (region) => {
@@ -238,6 +264,6 @@ test('regional sampling runs routing groups concurrently but serializes shared r
   };
   const observations = await client.sampleAll({ target: 1, regions: ['EUW', 'KR', 'NA', 'BR'] });
   assert.equal(observations.length, 4);
-  assert.equal(maxAmericasActive, 1);
-  assert.ok(maxActive >= 3);
+  assert.equal(maxAmericasActive, 2);
+  assert.equal(maxActive, 4);
 });
