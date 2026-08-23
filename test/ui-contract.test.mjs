@@ -150,6 +150,8 @@ test('refresh status polls a lightweight endpoint and reports only newly detecte
   assert.match(app, /Riot API timeout or network delay/);
   assert.match(server, /REFRESH_CANCELLED/);
   assert.match(server, /checkpointDigest/);
+  const css = await readFile(join(root, 'public', 'app.css'), 'utf8');
+  assert.match(css, /\.progress\.hidden\{display:none\}/);
 });
 
 test('portable data controls export and atomically import one tftpack without a Riot request', async () => {
