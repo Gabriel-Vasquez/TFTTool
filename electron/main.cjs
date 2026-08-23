@@ -2,7 +2,7 @@ const { app, BrowserWindow, dialog } = require('electron');
 const { join } = require('node:path');
 const { pathToFileURL } = require('node:url');
 const net = require('node:net');
-const { mkdirSync } = require('node:fs');
+const { copyFileSync, mkdirSync } = require('node:fs');
 const { spawn } = require('node:child_process');
 
 const preferredPort = Number(process.env.TFTTOOL_PORT) || 18473;
@@ -20,6 +20,16 @@ function startElevatedRelauncher({ relauncher, installer, application, parentPro
     broker.once('error', reject);
     broker.once('exit', (code) => code === 0 ? resolve() : reject(new Error(`UPDATE_ELEVATION_FAILED_${code ?? 'UNKNOWN'}`)));
   });
+}
+
+function stageRelauncher(updateDirectory) {
+  const source = app.isPackaged
+    ? join(app.getAppPath(), 'src', 'update-and-relaunch.ps1')
+    : join(__dirname, '..', 'src', 'update-and-relaunch.ps1');
+  const relauncher = join(updateDirectory, `update-and-relaunch-${app.getVersion()}.ps1`);
+  mkdirSync(updateDirectory, { recursive: true });
+  copyFileSync(source, relauncher);
+  return relauncher;
 }
 
 if (process.env.TFTTOOL_ELECTRON_USER_DATA) {
@@ -52,10 +62,8 @@ async function launch() {
   const started = await startTftServer(port, {
     onShutdown: () => app.quit(),
     onInstallUpdate: async (installer) => {
-      const relauncher = app.isPackaged
-        ? join(process.resourcesPath, 'app.asar.unpacked', 'src', 'update-and-relaunch.ps1')
-        : join(__dirname, '..', 'src', 'update-and-relaunch.ps1');
       const updateDirectory = join(process.env.TFTTOOL_DATA_DIR || join(process.env.LOCALAPPDATA || app.getPath('userData'), 'TFTTool'), 'updates');
+      const relauncher = stageRelauncher(updateDirectory);
       await startElevatedRelauncher({ relauncher, installer, application: process.execPath, parentProcessId: process.pid, statusFile: join(updateDirectory, 'install-status.json') });
       setTimeout(() => app.quit(), 250);
     }

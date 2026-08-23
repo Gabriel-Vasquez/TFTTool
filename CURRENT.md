@@ -12,9 +12,9 @@ All development and testing must run in the repository-owned isolated QA sandbox
 
 The first owner-facing in-place update must include the complete, freshly validated six-region real-data snapshot collected during QA so the product is ready for immediate use without another same-day refresh. Never discard that retrieved dataset. Import it only when newer than the owner's latest local snapshot, while preserving every existing historical snapshot, setting, and encrypted Riot key.
 
-- Phase: TFTTool 0.6.20 is published on public `main`. It fixes the empty data-refresh status container while retaining the 0.6.18 updater-repair test path.
+- Phase: TFTTool 0.6.21 is in release QA. It repairs a stale `app.asar.unpacked` updater-helper path discovered from the failed 0.6.18-to-0.6.20 attempt.
 - Branch: `main`.
-- Published release: TFTTool `0.6.20` is available on public `main` with tag `v0.6.20`; `updates/stable.json` references the verified `TFTTool.Setup.0.6.20.exe` asset.
+- Published release: TFTTool `0.6.20` is available on public `main` with tag `v0.6.20`; `0.6.21` will replace the stable manifest only after its installer and public asset checksum are verified.
 - GitHub: public `Gabriel-Vasquez/TFTTool`.
 - Implemented and installed: official multi-region Riot ingestion, protected local key storage and invalid-key replacement, full baseline plus incremental diff refresh, deterministic current-set archetypes, real trait breakpoints, exact prevalence/raw-placement weighting, TFTactics-style champion/item presentation, flagship-relative variant diffs, Team Planner export codes, shared-lobby matchup and opponent-conditioned Counter Item analytics, evidence drill-downs, snapshot history/trends, portable `.tftpack` transfer, complete EN/ES UX, bounded rendering/search, secured standalone Electron window, local shutdown control, compressed bundled snapshot import, and NSIS in-place updating.
 - Owner-data baseline: TFTTool 0.6.1 is installed at `C:\Program Files\TFTTool`. The data directory, encrypted key availability, Spanish preference, snapshot identity, history, and all 12,000 observations remain preserved after the in-place migration.
@@ -47,12 +47,13 @@ The first owner-facing in-place update must include the complete, freshly valida
 - Version 0.6.18 moves the Windows UAC/elevation broker before the application closes. A refused or failed elevation leaves TFTTool open and reports the failure; an accepted broker launches the elevated helper, which waits for the exact parent exit, updates the same directory, verifies the executable, and relaunches. Data refresh status now explains active Riot rate-limit and retry waits without obscuring normal progress. A user can cancel a refresh: in-flight requests and backoffs are aborted, the current valid snapshot stays untouched, and a SHA-256-verified checkpoint of already downloaded work is persisted for resume; invalid checkpoint sidecars are discarded without changing data or settings.
 - Version 0.6.19 is intentionally functionally identical to 0.6.18. It is a controlled public release used only to validate the repaired in-place updater from an already repaired 0.6.18 installation.
 - Version 0.6.20 restores the expected hidden state of the data-refresh status container. The higher-specificity `.progress.hidden` rule prevents the flex layout rule from leaving an empty bordered surface visible when no active, cancelled, failed, or insufficient-coverage status exists.
+- Version 0.6.21 corrects the actual 0.6.18 update failure: NSIS left the previous `app.asar.unpacked` PowerShell helper in place, so the new broker still launched old behavior. The packaged Electron main now copies the helper from its current `app.asar` payload into the local update directory immediately before elevation, and never executes `app.asar.unpacked`.
 - The Settings application-update button fetches the public stable manifest from `main`, accepts only this repository's HTTPS release assets, verifies exact byte size and SHA-256, then launches the NSIS in-place update. Version 0.6.2 is the final release requiring manual installer distribution.
 
 ## Next actions
 
-1. Finish the already authorized 0.6.18 in-place repair after the owner accepts the Windows UAC consent prompt, then use the Settings update button to test the 0.6.18-to-0.6.20 jump.
-2. Record the owner-visible update outcome and confirm the inactive refresh-status container is absent.
+1. Complete isolated package and public-channel validation of 0.6.21, then repair the owner installation in place from the verified public installer.
+2. Publish a controlled no-functional-change follow-up only after 0.6.21 repair if an owner-visible updater test remains required.
 3. Future explicit data refreshes reuse the rolling five-day/current-patch sample and request only post-baseline match IDs plus unseen match details.
 
 ## Blockers

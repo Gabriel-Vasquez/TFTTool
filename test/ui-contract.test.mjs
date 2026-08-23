@@ -187,6 +187,9 @@ test('settings opens as a floating dialog with a verified application updater', 
   assert.match(launcher, /update-and-relaunch\.ps1/);
   assert.match(launcher, /'-ParentProcessId', String\(parentProcessId\)/);
   assert.match(launcher, /spawn\('powershell\.exe'/);
+  assert.match(launcher, /function stageRelauncher/);
+  assert.match(launcher, /copyFileSync\(source, relauncher\)/);
+  assert.doesNotMatch(launcher, /app\.asar\.unpacked/);
   assert.equal(JSON.parse(packageJson).build.nsis.perMachine, true);
   assert.match(launcher, /-Verb RunAs/);
   assert.match(relauncher, /"\/D=\$installationDirectory"/);
