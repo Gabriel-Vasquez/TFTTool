@@ -161,11 +161,13 @@ test('portable data controls export and atomically import one tftpack without a 
 });
 
 test('settings opens as a floating dialog with a verified application updater', async () => {
-  const [html, app, css, launcher] = await Promise.all([
+  const [html, app, css, launcher, packageJson, relauncher] = await Promise.all([
     readFile(join(root, 'public', 'index.html'), 'utf8'),
     readFile(join(root, 'public', 'app.js'), 'utf8'),
     readFile(join(root, 'public', 'app.css'), 'utf8'),
-    readFile(join(root, 'electron', 'main.cjs'), 'utf8')
+    readFile(join(root, 'electron', 'main.cjs'), 'utf8'),
+    readFile(join(root, 'package.json'), 'utf8'),
+    readFile(join(root, 'src', 'update-and-relaunch.ps1'), 'utf8')
   ]);
   assert.match(html, /<dialog id="settings-dialog"/);
   assert.match(app, /button\.dataset\.tab === 'settings'.*openSettings/);
@@ -178,6 +180,10 @@ test('settings opens as a floating dialog with a verified application updater', 
   assert.match(launcher, /update-and-relaunch\.ps1/);
   assert.match(launcher, /'-ParentProcessId', String\(process\.pid\)/);
   assert.match(launcher, /spawn\('powershell\.exe'/);
+  assert.equal(JSON.parse(packageJson).build.nsis.perMachine, true);
+  assert.match(relauncher, /-Verb RunAs/);
+  assert.match(relauncher, /"\/D=\$installationDirectory"/);
+  assert.match(relauncher, /install-status\.json/);
 });
 
 test('one-star badges are muted while two-star badges are white and three-star badges remain prominent', async () => {
