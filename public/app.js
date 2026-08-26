@@ -1,7 +1,7 @@
 import { buildTeamCode } from './team-code.js';
 
 const ITEM_FILTER_TYPES = ['regular', 'emblem', 'radiant', 'artifact', 'support', 'set_mechanic', 'unknown'];
-const state = { tab: 'home', bootstrap: null, analysis: null, history: null, metadata: null, search: '', region: 'GLOBAL', weight: 50, championItemWeight: 100, snapshotId: null, keyPrompted: false, keySaving: false, refresh: null, refreshWasRunning: false, pollTimer: null, updatePollTimer: null, dataPackStatus: '', copyStatus: '', itemTypes: new Set(ITEM_FILTER_TYPES), selectedSynergies: new Set(), synergyMenuOpen: false, expandedCompositions: new Set(), expandedInteractions: new Set() };
+const state = { tab: 'home', bootstrap: null, analysis: null, history: null, metadata: null, datasetId: null, search: '', region: 'GLOBAL', weight: 50, championItemWeight: 100, snapshotId: null, keyPrompted: false, keySaving: false, refresh: null, refreshWasRunning: false, pollTimer: null, updatePollTimer: null, dataPackStatus: '', copyStatus: '', itemTypes: new Set(ITEM_FILTER_TYPES), selectedSynergies: new Set(), synergyMenuOpen: false, expandedCompositions: new Set(), expandedInteractions: new Set() };
 const copy = {
   es: { home: 'Meta actual', homeNav: 'Meta', favorites: 'Favoritos', items: 'Objetos', champions: 'Campeones', synergies: 'Sinergias', interactions: 'Interacciones', history: 'Historial', settings: 'Ajustes', eyebrow: 'ANÁLISIS DE ÉLITE', globalRegions: 'Global · todas las regiones', update: 'Actualizar datos', establishedMeta: 'Meta establecido', performance: 'Rendimiento', noData: 'Aún no hay una instantánea de meta', noDataDetail: 'Añade tu clave de Riot Games y pulsa Actualizar datos. El análisis usa exclusivamente partidas clasificatorias recientes y datos oficiales.', configure: 'Configurar clave de Riot', observations: 'observaciones', average: 'Posición media', top4: 'Top 4', win: 'Victoria', score: 'Puntuación meta', prevalence: 'Prevalencia', variants: 'variantes', patch: 'Parche', updated: 'Actualizado', compositions: 'Composiciones', noResults: 'Sin resultados', noResultsDetail: 'No hay resultados para el filtro actual.', evidence: 'EVIDENCIA Y DESGLOSE', sourceGames: 'Partidas fuente', officialIntegration: 'INTEGRACIÓN OFICIAL', riotKey: 'Clave de Riot Games', keySafety: 'Se cifra localmente para tu cuenta de Windows. Nunca se envía fuera de Riot ni se guarda en el repositorio.', saveRefresh: 'Guardar y actualizar', closeServer: 'Cerrar TFTTool', language: 'Idioma', preferences: 'PREFERENCIAS LOCALES', searchPlaceholder: 'Buscar campeones, objetos, sinergias o interacciones', expand: 'Ver variantes', collapse: 'Ocultar variantes' },
   en: { home: 'Current meta', homeNav: 'Meta', favorites: 'Favorites', items: 'Items', champions: 'Champions', synergies: 'Synergies', interactions: 'Team Interactions', history: 'History', settings: 'Settings', eyebrow: 'ELITE ANALYSIS', globalRegions: 'Global · all regions', update: 'Update data', establishedMeta: 'Established meta', performance: 'Performance', noData: 'No meta snapshot yet', noDataDetail: 'Add your Riot Games key and press Update data. Analysis uses only recent ranked games and official data.', configure: 'Configure Riot key', observations: 'observations', average: 'Average placement', top4: 'Top 4', win: 'Win rate', score: 'Meta score', prevalence: 'Prevalence', variants: 'variants', patch: 'Patch', updated: 'Updated', compositions: 'Compositions', noResults: 'No results', noResultsDetail: 'There are no results for the current filter.', evidence: 'EVIDENCE AND BREAKDOWN', sourceGames: 'Source games', officialIntegration: 'OFFICIAL INTEGRATION', riotKey: 'Riot Games key', keySafety: 'It is encrypted locally for your Windows account. It is never sent anywhere except Riot or stored in the repository.', saveRefresh: 'Save and update', closeServer: 'Close TFTTool', language: 'Language', preferences: 'LOCAL PREFERENCES', searchPlaceholder: 'Search champions, items, traits, or interactions', expand: 'Show variants', collapse: 'Hide variants' }
@@ -16,6 +16,14 @@ const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (character
 function language() { return state.bootstrap?.settings?.language || 'es'; }
 function layout() { return state.bootstrap?.settings?.layout === 'compact' ? 'compact' : 'standard'; }
 function text(key) { return copy[language()][key] || key; }
+function datasetQuery() { return `dataset=${encodeURIComponent(state.datasetId || '')}`; }
+function datasetParts(datasetId = state.datasetId) { const match = String(datasetId || '').match(/^set-(\d+)-(live|pbe)$/); return match ? { setNumber: Number(match[1]), source: match[2] } : { setNumber: null, source: 'live' }; }
+function datasetIdFor(setNumber, source) { return `set-${Number(setNumber)}-${source === 'pbe' ? 'pbe' : 'live'}`; }
+function availableSetNumbers(datasets = state.bootstrap?.datasets || []) { return [...new Set(datasets.map((dataset) => Number(dataset.setNumber)).filter(Number.isFinite))].sort((left, right) => right - left); }
+function datasetHasData(setNumber, source) { return (state.bootstrap?.datasets || []).some((dataset) => Number(dataset.setNumber) === Number(setNumber) && dataset.source === source); }
+function isPbeDataset() { return state.datasetId?.endsWith('-pbe'); }
+function globalRegionLabel() { return isPbeDataset() ? (language() === 'es' ? 'PBE · todas las partidas' : 'PBE · all matches') : text('globalRegions'); }
+function patchDisplayLabel(patch) { return isPbeDataset() ? 'PBE' : patchLabel(patch); }
 function scored(items, prevalenceWeight = state.weight) { if (!items.length) return []; const weight = prevalenceWeight / 100; const prevalence = items.map((item) => item.prevalence); const placement = items.map((item) => item.averagePlacement); const minPrevalence = Math.min(...prevalence); const maxPrevalence = Math.max(...prevalence); const minPlacement = Math.min(...placement); const maxPlacement = Math.max(...placement); const normalize = (value, minimum, maximum) => maximum <= minimum ? 0 : Math.max(0, Math.min(1, (value - minimum) / (maximum - minimum))); return items.map((item) => ({ ...item, score: (normalize(item.prevalence, minPrevalence, maxPrevalence) * weight) + ((1 - normalize(item.averagePlacement, minPlacement, maxPlacement)) * (1 - weight)) })).sort((a, b) => b.score - a.score || b.prevalence - a.prevalence || a.id.localeCompare(b.id)); }
 function metadata(type, id) { const source = type === 'synergies' ? 'traits' : type; const key = type === 'synergies' ? id.split(':')[0] : id; return state.metadata?.[source]?.[key] || { id, name: id, image: null }; }
 function itemType(id) { return metadata('items', id).type || 'unknown'; }
@@ -117,6 +125,7 @@ function applyChromeTranslations() {
   document.documentElement.lang = language();
   $('#tabs').setAttribute('aria-label', language() === 'es' ? 'Navegación principal' : 'Primary navigation');
   document.querySelectorAll('[data-copy]').forEach((node) => { node.textContent = text(node.dataset.copy); });
+  document.querySelector('[data-copy="eyebrow"]').textContent = isPbeDataset() ? (language() === 'es' ? 'ANÁLISIS DE PARTIDAS PBE' : 'PBE MATCH ANALYSIS') : text('eyebrow');
   $('#search').placeholder = text('searchPlaceholder');
   $('#language-toggle').textContent = language() === 'es' ? 'ES / EN' : 'EN / ES';
   $('#layout-label').textContent = language() === 'es' ? 'Diseño' : 'Layout';
@@ -176,19 +185,24 @@ function compositionCard(item) {
   return `<article class="row comp-card layout-${layout()} ${expanded ? 'expanded' : ''}" data-synergies="${escapeHtml(synergyIds)}" data-champions="${escapeHtml(championIds)}"><div class="comp comp-summary" tabindex="0" role="button" data-composition-id="${escapeHtml(item.id)}" aria-expanded="${expanded}"><div class="name"><div class="comp-title"><span class="trait-strip">${compositionParts(item).map((part) => icon('synergies', part.id, 'trait-icon', `${percent(part.prevalence || 0)} ${language() === 'es' ? 'del arquetipo' : 'of archetype'}`)).join('')}</span>${escapeHtml(compositionDisplayName(item))}${emblemBadge(item)}</div>${lineup}<div class="sub">${number.format(item.sampleSize)} ${text('observations')} · ${number.format(variants)} ${text('variants')} · <span class="expand-label">${text(expanded ? 'collapse' : 'expand')}</span><div class="bar"><i style="width:${percent(item.prevalence)}"></i></div></div>${placementDistribution(item)}</div><div class="summary-metrics">${metrics}</div><div class="score-stack"><div class="score" title="${text('score')}">${Math.round(item.score * 100)}<span class="expand-chevron">${expanded ? '▴' : '▾'}</span></div><div class="card-actions">${favoriteButton('archetype', item.id)}${teamCodeButton(flagship?.champions || [])}</div></div></div>${expanded ? `<div class="comp-expansion">${compositionBreakdown(item)}</div>` : ''}</article>`;
 }
 function home(snapshot) {
-  if (!snapshot) return `<section class="empty"><div><div class="crest">◇</div><p class="eyebrow">${language() === 'es' ? 'TU META, CON DATOS REALES' : 'YOUR META, POWERED BY REAL DATA'}</p><h2>${text('noData')}</h2><p>${text('noDataDetail')}</p><button class="primary" data-open-key>${text('configure')}</button></div></section>`;
+  if (!snapshot) {
+    const selected = datasetParts();
+    const source = selected.source === 'pbe' ? 'PBE' : 'Live';
+    const detail = language() === 'es' ? `No hay datos ${source} disponibles para Set ${selected.setNumber}. Importa un archivo .tftpack; PBE solo se mostrará si lo seleccionas explícitamente.` : `No ${source} data is available for Set ${selected.setNumber}. Import a .tftpack; PBE is shown only when you explicitly select it.`;
+    return `<section class="empty"><div><div class="crest">◇</div><p class="eyebrow">${language() === 'es' ? 'TU META, CON DATOS REALES' : 'YOUR META, POWERED BY REAL DATA'}</p><h2>${text('noData')}</h2><p>${detail}</p><div class="empty-actions"><button class="primary" data-import-pack>${language() === 'es' ? 'Importar datos' : 'Import data'}</button><button data-open-key>${text('configure')}</button></div></div></section>`;
+  }
   const result = snapshot.result;
   const matchingCompositions = visible(result.compositions.filter(compositionAllowed), 'composition'); const compositions = matchingCompositions.slice(0, MAX_VISIBLE_RESULTS);
   const historical = state.snapshotId ? `<div class="snapshot-notice">${language() === 'es' ? 'Viendo una instantánea histórica.' : 'Viewing a historical snapshot.'} <button data-latest>${language() === 'es' ? 'Volver a la actual' : 'Return to latest'}</button></div>` : '';
   const cards = compositions.map(compositionCard).join('');
   const compositionCount = matchingCompositions.length === result.compositions.length ? number.format(result.compositions.length) : `${number.format(matchingCompositions.length)} / ${number.format(result.compositions.length)}`;
-  return `${historical}<section class="snapshot-meta"><article class="metric"><span>${text('observations')}</span><strong>${number.format(result.observations)}</strong></article><article class="metric"><span>${text('compositions')}</span><strong>${compositionCount}</strong></article><article class="metric"><span>${text('patch')}</span><strong>${escapeHtml(patchLabel(snapshot.patch))}</strong><small>Set ${escapeHtml(setLabel(snapshot.set))}</small></article><article class="metric"><span>${text('updated')}</span><strong>${new Intl.DateTimeFormat(language()).format(new Date(snapshot.createdAt))}</strong></article></section>${resultLimitNotice(compositions.length, matchingCompositions.length)}<div class="list composition-list layout-${layout()}">${cards}</div>`;
+  return `${historical}<section class="snapshot-meta"><article class="metric"><span>${text('observations')}</span><strong>${number.format(result.observations)}</strong></article><article class="metric"><span>${text('compositions')}</span><strong>${compositionCount}</strong></article><article class="metric"><span>${text('patch')}</span><strong>${escapeHtml(patchDisplayLabel(snapshot.patch))}</strong><small>Set ${escapeHtml(setLabel(snapshot.set))}</small></article><article class="metric"><span>${text('updated')}</span><strong>${new Intl.DateTimeFormat(language()).format(new Date(snapshot.createdAt))}</strong></article></section>${resultLimitNotice(compositions.length, matchingCompositions.length)}<div class="list composition-list layout-${layout()}">${cards}</div>`;
 }
 function canonicalLineup(champions = []) { return [...new Set(champions.map((champion) => typeof champion === 'string' ? champion : champion.id).filter(Boolean))].sort((left, right) => left.localeCompare(right)); }
-function favoriteIdentity(kind, compositionId, championIds = []) { return kind === 'variant' ? `variant:${compositionId}:${canonicalLineup(championIds).join('+')}` : `archetype:${compositionId}`; }
+function favoriteIdentity(kind, compositionId, championIds = [], datasetId = state.datasetId) { const prefix = `${datasetId}:`; return kind === 'variant' ? `${prefix}variant:${compositionId}:${canonicalLineup(championIds).join('+')}` : `${prefix}archetype:${compositionId}`; }
 function favoriteButton(kind, compositionId, champions = [], compact = false) {
   const championIds = canonicalLineup(champions);
-  const active = (state.bootstrap?.favorites || []).some((favorite) => favoriteIdentity(favorite.kind, favorite.compositionId, favorite.championIds) === favoriteIdentity(kind, compositionId, championIds));
+  const active = (state.bootstrap?.favorites || []).some((favorite) => favoriteIdentity(favorite.kind, favorite.compositionId, favorite.championIds, favorite.datasetId) === favoriteIdentity(kind, compositionId, championIds));
   const title = active ? (language() === 'es' ? 'Quitar de Favoritos' : 'Remove from Favorites') : (language() === 'es' ? 'Guardar en Favoritos' : 'Save to Favorites');
   return `<button type="button" class="favorite-toggle ${active ? 'active' : ''} ${compact ? 'compact' : ''}" data-favorite-kind="${kind}" data-favorite-composition="${escapeHtml(compositionId)}" data-favorite-lineup="${escapeHtml(championIds.join(','))}" aria-pressed="${active}" title="${title}">${active ? '★' : '☆'}</button>`;
 }
@@ -203,7 +217,7 @@ function favoriteVariantCard(composition, variant) {
 }
 function favoritesView(snapshot) {
   if (!snapshot) return home(snapshot);
-  const stored = state.bootstrap?.favorites || [];
+  const stored = (state.bootstrap?.favorites || []).filter((favorite) => favorite.datasetId === state.datasetId);
   if (!stored.length) return `<section class="empty favorites-empty"><div><div class="crest">☆</div><h2>${language() === 'es' ? 'Aún no hay favoritos' : 'No favorites yet'}</h2><p>${language() === 'es' ? 'Pulsa la estrella de un arquetipo o de una variante para guardarlo localmente.' : 'Press the star on an archetype or variant to save it locally.'}</p></div></section>`;
   const result = snapshot.result;
   const compositions = new Map(result.compositions.map((composition) => [composition.id, composition]));
@@ -230,7 +244,7 @@ function favoritesView(snapshot) {
   const unavailableNotice = unavailable ? `<div class="snapshot-notice favorite-unavailable"><span>${number.format(unavailable)} ${language() === 'es' ? 'favorito no está disponible en estos datos; se conserva localmente.' : 'favorite is unavailable in this data and remains saved locally.'}</span></div>` : '';
   const cards = entries.map((entry) => entry.html()).join('');
   const content = cards || `<section class="empty"><div><h2>${text('noResults')}</h2><p>${text('noResultsDetail')}</p></div></section>`;
-  return `${unavailableNotice}<section class="snapshot-meta"><article class="metric"><span>${text('observations')}</span><strong>${number.format(result.observations)}</strong></article><article class="metric"><span>${text('favorites')}</span><strong>${number.format(entries.length)} / ${number.format(stored.length)}</strong></article><article class="metric"><span>${text('patch')}</span><strong>${escapeHtml(patchLabel(snapshot.patch))}</strong><small>Set ${escapeHtml(setLabel(snapshot.set))}</small></article><article class="metric"><span>${text('updated')}</span><strong>${new Intl.DateTimeFormat(language()).format(new Date(snapshot.createdAt))}</strong></article></section><div class="list composition-list layout-${layout()}">${content}</div>`;
+  return `${unavailableNotice}<section class="snapshot-meta"><article class="metric"><span>${text('observations')}</span><strong>${number.format(result.observations)}</strong></article><article class="metric"><span>${text('favorites')}</span><strong>${number.format(entries.length)} / ${number.format(stored.length)}</strong></article><article class="metric"><span>${text('patch')}</span><strong>${escapeHtml(patchDisplayLabel(snapshot.patch))}</strong><small>Set ${escapeHtml(setLabel(snapshot.set))}</small></article><article class="metric"><span>${text('updated')}</span><strong>${new Intl.DateTimeFormat(language()).format(new Date(snapshot.createdAt))}</strong></article></section><div class="list composition-list layout-${layout()}">${content}</div>`;
 }
 
 function interactionComposition(id) { return state.analysis?.result?.compositions.find((composition) => composition.id === id); }
@@ -336,7 +350,37 @@ function renderRefreshProgress(snapshot = state.analysis) {
   progress.classList.add('hidden');
 }
 
-async function load() { const [bootstrap, snapshots] = await Promise.all([api('/api/bootstrap'), api('/api/snapshots')]); state.bootstrap = { ...bootstrap, snapshots }; state.refresh = bootstrap.refresh; const snapshot = state.snapshotId ? `&snapshot=${encodeURIComponent(state.snapshotId)}` : ''; [state.analysis, state.history] = await Promise.all([api(`/api/analysis?region=${encodeURIComponent(state.region)}${snapshot}`), api('/api/history')]); state.metadata = null; if (state.analysis) { try { state.metadata = await api(`/api/metadata?patch=${encodeURIComponent(state.analysis.patch || '')}&locale=${language() === 'en' ? 'en_US' : 'es_ES'}`); } catch {} } render(); renderRefreshProgress(); }
+async function load() {
+  const [bootstrap, allSnapshots] = await Promise.all([api('/api/bootstrap'), api('/api/snapshots')]);
+  const sets = availableSetNumbers(bootstrap.datasets);
+  const remembered = datasetParts(state.datasetId || bootstrap.settings.datasetId || bootstrap.defaultDatasetId);
+  const selectedSet = sets.includes(remembered.setNumber) ? remembered.setNumber : sets[0];
+  state.datasetId = Number.isFinite(selectedSet) ? datasetIdFor(selectedSet, remembered.source) : null;
+  const query = datasetQuery();
+  const snapshots = allSnapshots.filter((snapshot) => snapshot.dataset?.id === state.datasetId);
+  state.bootstrap = { ...bootstrap, snapshots }; state.refresh = bootstrap.refresh;
+  const snapshot = state.snapshotId ? `&snapshot=${encodeURIComponent(state.snapshotId)}` : '';
+  [state.analysis, state.history] = await Promise.all([api(`/api/analysis?${query}&region=${encodeURIComponent(state.region)}${snapshot}`), api(`/api/history?${query}`)]);
+  state.metadata = null;
+  if (state.analysis) { try { state.metadata = await api(`/api/metadata?${query}&patch=${encodeURIComponent(state.analysis.patch || '')}&locale=${language() === 'en' ? 'en_US' : 'es_ES'}`); } catch {} }
+  const selected = datasetParts();
+  const setFilter = $('#set-filter');
+  setFilter.innerHTML = sets.map((setNumber) => `<option value="${setNumber}">Set ${setNumber}</option>`).join(''); setFilter.value = String(selected.setNumber || '');
+  $('.source-filter-label').textContent = language() === 'es' ? 'Entorno' : 'Environment';
+  $('#source-filter').setAttribute('aria-label', language() === 'es' ? 'Entorno de datos' : 'Data environment');
+  document.querySelectorAll('[data-source]').forEach((button) => {
+    const source = button.dataset.source;
+    const hasData = datasetHasData(selected.setNumber, source);
+    button.classList.toggle('active', source === selected.source);
+    button.classList.toggle('has-data', hasData);
+    button.setAttribute('aria-pressed', String(source === selected.source));
+    button.title = hasData ? (language() === 'es' ? `Datos disponibles para Set ${selected.setNumber}` : `Data available for Set ${selected.setNumber}`) : (language() === 'es' ? `Sin datos para Set ${selected.setNumber}` : `No data for Set ${selected.setNumber}`);
+  });
+  const regions = state.analysis?.regions || [];
+  $('#region-filter').innerHTML = `<option value="GLOBAL">${globalRegionLabel()}</option>${regions.filter((region) => region !== 'GLOBAL' && !(isPbeDataset() && region === 'PBE')).map((region) => `<option value="${escapeHtml(region)}">${escapeHtml(region)}</option>`).join('')}`;
+  if (state.region !== 'GLOBAL' && !regions.includes(state.region)) state.region = 'GLOBAL'; $('#region-filter').value = state.region;
+  render(); renderRefreshProgress();
+}
 function setKeySaving(saving) {
   state.keySaving = saving;
   $('#riot-key').disabled = saving;
@@ -360,7 +404,7 @@ function openKey() {
 
 async function startRefresh() {
   state.snapshotId = null;
-  try { await api('/api/refresh', { method: 'POST' }); }
+  try { await api('/api/refresh', { method: 'POST', body: JSON.stringify({ datasetId: state.datasetId }) }); }
   catch (error) { if (error.message !== 'refresh_in_progress') throw error; }
   state.refreshWasRunning = true;
   state.refresh = { state: 'starting', newObservations: 0, progressPercent: 0 };
@@ -534,7 +578,7 @@ async function openCompositionChampion(compositionId, championId) {
   const champion = composition?.champions.find((item) => item.id === championId);
   if (!composition || !champion) return;
   const snapshot = state.snapshotId ? `&snapshot=${encodeURIComponent(state.snapshotId)}` : '';
-  const evidence = await api(`/api/evidence?type=composition-champion&id=${encodeURIComponent(championId)}&composition=${encodeURIComponent(compositionId)}&region=${encodeURIComponent(state.region)}${snapshot}`);
+  const evidence = await api(`/api/evidence?${datasetQuery()}&type=composition-champion&id=${encodeURIComponent(championId)}&composition=${encodeURIComponent(compositionId)}&region=${encodeURIComponent(state.region)}${snapshot}`);
   state.championItemWeight = 100;
   activeCompositionChampion = { composition, champion, evidence };
   renderCompositionChampionDetail();
@@ -543,7 +587,7 @@ async function openCompositionChampion(compositionId, championId) {
 
 async function openDetails(type, id) {
   const snapshot = state.snapshotId ? `&snapshot=${encodeURIComponent(state.snapshotId)}` : '';
-  const evidence = await api(`/api/evidence?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}&region=${encodeURIComponent(state.region)}${snapshot}`);
+  const evidence = await api(`/api/evidence?${datasetQuery()}&type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}&region=${encodeURIComponent(state.region)}${snapshot}`);
   const source = state.analysis.result[type];
   const entity = source.find((item) => item.id === id);
   const meta = metadata(type, id);
@@ -560,7 +604,7 @@ async function toggleFavorite(button) {
   const kind = button.dataset.favoriteKind;
   const compositionId = button.dataset.favoriteComposition;
   const championIds = button.dataset.favoriteLineup ? button.dataset.favoriteLineup.split(',').filter(Boolean) : [];
-  const favorite = kind === 'variant' ? { kind, compositionId, championIds } : { kind, compositionId };
+  const favorite = kind === 'variant' ? { datasetId: state.datasetId, kind, compositionId, championIds } : { datasetId: state.datasetId, kind, compositionId };
   const active = button.getAttribute('aria-pressed') !== 'true';
   button.disabled = true;
   state.bootstrap.favorites = await api('/api/favorites', { method: 'PUT', body: JSON.stringify({ favorite, active }) });
@@ -574,6 +618,9 @@ $('#detail-body').addEventListener('input', (event) => { if (event.target.matche
 $('#language-toggle').addEventListener('click', async () => { await api('/api/settings', { method: 'PUT', body: JSON.stringify({ language: language() === 'es' ? 'en' : 'es' }) }); await load(); });
 $('#layout-selector').addEventListener('change', async (event) => { const settings = await api('/api/settings', { method: 'PUT', body: JSON.stringify({ layout: event.target.value }) }); state.bootstrap.settings = settings; state.expandedCompositions.clear(); render(); });
 $('#region-filter').addEventListener('change', async (event) => { state.region = event.target.value; state.expandedCompositions.clear(); state.expandedInteractions.clear(); await load(); });
+async function selectDataset(setNumber, source) { state.datasetId = datasetIdFor(setNumber, source); state.region = 'GLOBAL'; state.snapshotId = null; state.selectedSynergies.clear(); state.itemTypes = new Set(ITEM_FILTER_TYPES); state.expandedCompositions.clear(); state.expandedInteractions.clear(); await api('/api/settings', { method: 'PUT', body: JSON.stringify({ datasetId: state.datasetId }) }); await load(); }
+$('#set-filter').addEventListener('change', async (event) => { await selectDataset(Number(event.target.value), datasetParts().source); });
+$('#source-filter').addEventListener('click', async (event) => { const button = event.target.closest('[data-source]'); if (!button || button.dataset.source === datasetParts().source) return; await selectDataset(datasetParts().setNumber, button.dataset.source); });
 $('#update').addEventListener('click', async () => { if (!state.bootstrap.hasApiKey) return openKey(); await startRefresh(); });
 $('#progress').addEventListener('click', async (event) => { if (event.target.closest('[data-cancel-refresh]')) await cancelRefresh(); });
 $('#content').addEventListener('click', async (event) => {

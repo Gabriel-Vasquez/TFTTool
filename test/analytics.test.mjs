@@ -20,6 +20,12 @@ test('Riot unit rarity maps to patch-agnostic one-to-five champion costs', () =>
   assert.equal(unitCost({ rarity: 99, cost: 5 }), 5);
 });
 
+test('Unreal data uses its patch-agnostic contiguous zero-to-four cost encoding', () => {
+  const match = { metadata: { match_id: 'PBE1_1' }, info: { tft_set_number: 18, participants: [], game_datetime: Date.now(), game_version: 'TFT Unreal' } };
+  const participant = { puuid: 'p', placement: 1, traits: [], units: [{ character_id: 'DA_18_Ahri', rarity: 3, tier: 2, itemNames: [] }, { character_id: 'DA_18_GnarSmall', rarity: 4, tier: 2, itemNames: [] }] };
+  assert.deepEqual(normalizeParticipant(match, participant, 'PBE').units.map((unit) => unit.cost), [4, 5]);
+});
+
 function archetypeSamples(prefix, count, itemId, placement = 4) {
   return Array.from({ length: count }, (_, index) => observation(`${prefix}-${index}`, placement + (index % 2), [
     unit('SharedCarry', [itemId, `${itemId}2`, `${itemId}3`], 2, 4),

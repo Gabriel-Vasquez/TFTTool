@@ -25,8 +25,9 @@ test('history snapshots are retained until the user explicitly deletes them', as
   await store.addSnapshot({ id: 'first', observations: [] });
   await store.addSnapshot({ id: 'second', observations: [] });
   assert.deepEqual(store.state.snapshots.map((snapshot) => snapshot.id), ['first', 'second']);
-  const saved = JSON.parse(await readFile(join(directory, 'state.json'), 'utf8'));
-  assert.equal(saved.snapshots.length, 2);
+  const reloaded = new LocalStore(directory);
+  await reloaded.load();
+  assert.equal(reloaded.state.snapshots.length, 2);
 });
 
 test('concurrent local mutations serialize atomic state writes', async (t) => {
@@ -41,13 +42,16 @@ test('concurrent local mutations serialize atomic state writes', async (t) => {
   ]);
   const saved = JSON.parse(await readFile(join(directory, 'state.json'), 'utf8'));
   assert.equal(saved.settings.language, 'en');
-  assert.equal(saved.snapshots[0].id, 'snapshot');
+  assert.equal(saved.snapshots, undefined);
+  assert.ok((await readFile(join(directory, 'state.json'))).length < 10_000);
+  assert.ok((await readFile(join(directory, 'library.json.gz'))).length > 0);
   assert.equal(saved.refreshCheckpoint, null);
   const checkpoint = JSON.parse(await readFile(join(directory, 'refresh-checkpoint.json'), 'utf8'));
   assert.ok(checkpoint.startedAt);
   assert.match(checkpoint.digest, /^[a-f0-9]{64}$/);
   const reloaded = new LocalStore(directory);
   await reloaded.load();
+  assert.equal(reloaded.state.snapshots[0].id, 'snapshot');
   assert.ok(reloaded.state.refreshCheckpoint.startedAt);
 });
 
@@ -75,12 +79,26 @@ test('favorites are canonical, local, and preserved by portable data imports', a
   await store.setFavorite({ kind: 'archetype', compositionId: 'core:Carry+Tank' }, true);
   await store.importPortableData({ snapshots: [], metadata: { en_US: { version: 'future' } } });
   assert.deepEqual(store.state.favorites, [
-    { kind: 'archetype', compositionId: 'core:Carry+Tank' },
-    { kind: 'variant', compositionId: 'core:Carry+Tank', championIds: ['Carry', 'Tank'] }
+    { datasetId: 'set-17-live', kind: 'archetype', compositionId: 'core:Carry+Tank' },
+    { datasetId: 'set-17-live', kind: 'variant', compositionId: 'core:Carry+Tank', championIds: ['Carry', 'Tank'] }
   ]);
   const reloaded = new LocalStore(directory);
   await reloaded.load();
   assert.deepEqual(reloaded.state.favorites, store.state.favorites);
+});
+
+test('favorites remain independent across Live and PBE datasets while legacy entries migrate to Live', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'tfttool-store-set-favorites-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = new LocalStore(directory);
+  await store.load();
+  await store.setFavorite({ kind: 'archetype', compositionId: 'core:Shared' }, true);
+  await store.setFavorite({ datasetId: 'set-18-pbe', kind: 'archetype', compositionId: 'core:Shared' }, true);
+
+  assert.deepEqual(store.state.favorites, [
+    { datasetId: 'set-17-live', kind: 'archetype', compositionId: 'core:Shared' },
+    { datasetId: 'set-18-pbe', kind: 'archetype', compositionId: 'core:Shared' }
+  ]);
 });
 
 test('bundled snapshot imports only when newer and preserves history and settings', async (t) => {
@@ -212,9 +230,59 @@ test('portable data import is atomic and merges new snapshots without deleting h
   assert.deepEqual(store.state.snapshots.map((snapshot) => snapshot.id), ['existing', 'portable']);
 
   const before = store.state;
-  store.save = async () => { throw new Error('simulated_write_failure'); };
+  store.saveLibrary = async () => { throw new Error('simulated_write_failure'); };
   await assert.rejects(store.importPortableData({ snapshots: [publishableSnapshot('failed', '2026-08-21T00:00:00.000Z')], metadata: {} }), /simulated_write_failure/);
   assert.equal(store.state, before);
+});
+
+test('portable metadata imports preserve other datasets and their set-scoped portraits', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'tfttool-store-dataset-metadata-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = new LocalStore(directory);
+  await store.load();
+  await store.updatePortableMetadata({ datasets: { 'set-18-pbe': { es_ES: { champions: { TFT18_Ahri: { image: 'set18.png' } } }, en_US: { version: 'pbe-18' } } } });
+
+  await store.importPortableData({ snapshots: [], metadata: { datasets: { 'set-17-live': { es_ES: { champions: { TFT17_Ahri: { image: 'set17.png' } } } } } } });
+
+  assert.equal(store.state.portableMetadata.datasets['set-18-pbe'].es_ES.champions.TFT18_Ahri.image, 'set18.png');
+  assert.equal(store.state.portableMetadata.datasets['set-18-pbe'].en_US.version, 'pbe-18');
+  assert.equal(store.state.portableMetadata.datasets['set-17-live'].es_ES.champions.TFT17_Ahri.image, 'set17.png');
+});
+
+test('multi-dataset bundled seed verifies every Live and PBE snapshot before skipping the pack', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'tfttool-store-multi-seed-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = new LocalStore(directory); await store.load();
+  const live = { ...publishableSnapshot('live-seed', '2026-08-20T00:00:00.000Z'), dataset: { id: 'set-17-live', source: 'live', setNumber: 17 } };
+  const pbe = { ...publishableSnapshot('pbe-seed', '2026-08-21T00:00:00.000Z'), dataset: { id: 'set-18-pbe', source: 'pbe', setNumber: 18 } };
+  const pack = createDataPack({ snapshots: [live, pbe], metadata: { es_ES: {}, en_US: {}, datasets: { 'set-18-pbe': { es_ES: {}, en_US: {} } } }, appVersion: '0.6.28' });
+  const packSha256 = createHash('sha256').update(pack).digest('hex');
+  const packFile = join(directory, 'latest-snapshot.tftpack'); const manifestFile = join(directory, 'latest-snapshot.manifest.json');
+  await writeFile(packFile, pack);
+  await writeFile(manifestFile, JSON.stringify({ format: 'tfttool-bundled-data', version: 1, snapshotId: pbe.id, observationCount: 1, analysisVersion: pbe.result.analysisVersion, packSha256, datasets: [{ id: 'set-17-live', snapshotId: live.id, observations: 1 }, { id: 'set-18-pbe', snapshotId: pbe.id, observations: 1 }] }));
+  assert.equal((await importBundledSnapshot(store, packFile, manifestFile)).imported, true);
+  assert.deepEqual(store.datasets().map((entry) => entry.id), ['set-18-pbe', 'set-17-live']);
+  assert.equal(store.defaultDatasetId(), 'set-18-live');
+  assert.equal(store.latestSnapshot(), null);
+  await store.updateSettings({ datasetId: 'set-18-pbe' });
+  assert.equal(store.latestSnapshot().id, pbe.id);
+  assert.equal(store.state.bundledSnapshotHashes[live.id], packSha256); assert.equal(store.state.bundledSnapshotHashes[pbe.id], packSha256);
+  await writeFile(packFile, 'unreadable after both datasets were verified');
+  assert.deepEqual(await importBundledSnapshot(store, packFile, manifestFile), { imported: false, reason: 'already_verified' });
+});
+
+test('a future Live dataset becomes usable through data import without changing selector infrastructure', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'tfttool-store-future-live-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = new LocalStore(directory); await store.load();
+  const pbe = { ...publishableSnapshot('pbe-18', '2026-08-20T00:00:00.000Z'), dataset: { id: 'set-18-pbe', source: 'pbe', setNumber: 18 } };
+  await store.importPortableData({ snapshots: [pbe], metadata: {} });
+  assert.equal(store.defaultDatasetId(), 'set-18-live');
+  assert.equal(store.latestSnapshot(), null);
+  const live = { ...publishableSnapshot('live-18', '2026-09-01T00:00:00.000Z'), dataset: { id: 'set-18-live', source: 'live', setNumber: 18 } };
+  await store.importPortableData({ snapshots: [live], metadata: { datasets: { 'set-18-live': { es_ES: {}, en_US: {} } } } });
+  assert.equal(store.defaultDatasetId(), 'set-18-live');
+  assert.equal(store.latestSnapshot().id, 'live-18');
 });
 
 test('atomic state replacement retries transient Windows sharing violations', async (t) => {

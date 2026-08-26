@@ -19,6 +19,8 @@ const displayableUnit = (unit) => {
 export function normalizeParticipant(match, participant, region, ladder = {}) {
   const info = match.info || {};
   const metadata = match.metadata || {};
+  const setNumber = Number.isFinite(Number(info.tft_set_number)) ? Number(info.tft_set_number) : null;
+  const contiguousRarity = /\bTFT\s+Unreal\b/i.test(String(info.game_version || ''));
   const traits = (participant.traits || [])
     .filter((trait) => validNumber(trait.style) > 0 || validNumber(trait.tier_current) > 0)
     .map((trait) => ({
@@ -36,7 +38,7 @@ export function normalizeParticipant(match, participant, region, ladder = {}) {
       tier: validNumber(unit.tier, 1),
       items: (unit.itemNames || unit.items || []).map(String),
       rarity,
-      cost: unitCost({ rarity, cost: unit.cost }) || validNumber(unit.cost)
+      cost: contiguousRarity && rarity >= 0 && rarity <= 4 ? rarity + 1 : unitCost({ rarity, cost: unit.cost }) || validNumber(unit.cost)
     };
   });
   return {
@@ -51,6 +53,8 @@ export function normalizeParticipant(match, participant, region, ladder = {}) {
     recordedAt: new Date(validNumber(info.game_datetime, Date.now())).toISOString(),
     patch: patchLine(info.game_version),
     gameVersion: info.game_version || 'unknown',
+    queueId: Number.isFinite(Number(info.queue_id)) ? Number(info.queue_id) : null,
+    setNumber,
     set: info.tft_set_core_name || info.tft_set_number || 'unknown',
     placement: validNumber(participant.placement, 8),
     level: validNumber(participant.level),

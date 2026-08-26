@@ -1,6 +1,6 @@
 {
   "name": "tfttool",
-  "version": "0.6.27",
+  "version": "0.6.28",
   "description": "Local TFT elite meta analytics powered by official Riot data.",
   "author": "Gabriel Vasquez",
   "private": true,

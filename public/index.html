@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; img-src 'self' https://ddragon.leagueoflegends.com data:; script-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; img-src 'self' https://ddragon.leagueoflegends.com https://raw.communitydragon.org data:; script-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'self'">
     <title>TFTTool · Meta</title>
     <link rel="icon" href="/icon.png">
     <link rel="stylesheet" href="/app.css">
@@ -28,8 +28,8 @@
       </aside>
       <main>
         <header class="topbar">
-          <div><p class="eyebrow" data-copy="eyebrow">ANÁLISIS DE ÉLITE</p><h1 id="page-title">Meta actual</h1></div>
-          <div class="top-actions"><button id="language-toggle" class="language-toggle" title="Switch language">ES / EN</button><select id="region-filter"><option value="GLOBAL" data-copy="globalRegions">Global · todas las regiones</option><option>EUW</option><option>NA</option><option>KR</option><option>BR</option><option>LAN</option><option>LAS</option></select><button id="update" class="primary" data-copy="update">Actualizar datos</button></div>
+          <div class="title-block"><p class="eyebrow" data-copy="eyebrow">ANÁLISIS DE ÉLITE</p><h1 id="page-title">Meta actual</h1><div id="source-filter" class="source-filter" role="group" aria-label="Entorno de datos"><span class="source-filter-label">Entorno</span><button type="button" data-source="live">Live</button><button type="button" data-source="pbe">PBE</button></div></div>
+          <div class="top-actions"><button id="language-toggle" class="language-toggle" title="Switch language">ES / EN</button><label class="set-filter"><span>Set</span><select id="set-filter" aria-label="Set"></select></label><select id="region-filter"><option value="GLOBAL" data-copy="globalRegions">Global · todas las regiones</option><option>EUW</option><option>NA</option><option>KR</option><option>BR</option><option>LAN</option><option>LAS</option></select><button id="update" class="primary" data-copy="update">Actualizar datos</button></div>
         </header>
         <section id="progress" class="progress hidden"></section>
         <section class="toolbar"><label class="search"><span>⌕</span><input id="search" placeholder="Buscar campeones, objetos o sinergias"></label><label class="layout-control"><span id="layout-label">Diseño</span><select id="layout-selector"><option value="standard">Estándar</option><option value="compact">Compacto</option></select></label><label class="slider-label"><span data-copy="establishedMeta">Meta establecido</span> <input id="weight" type="range" min="0" max="100" value="50" title="50% prevalencia · 50% posición media"> <span data-copy="performance">Rendimiento</span></label><span id="weight-value">50 / 50</span><span class="icon-wrap score-help" tabindex="0" aria-label="Cómo se calcula la puntuación">ⓘ<span class="tooltip" id="score-tooltip">50% prevalencia · 50% posición media. Ambas métricas se normalizan y una posición menor es mejor.</span></span></section>

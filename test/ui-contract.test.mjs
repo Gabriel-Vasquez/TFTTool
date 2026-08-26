@@ -391,6 +391,8 @@ test('archetypes and exact variants persist into a local Favorites meta tab', as
   ]);
   assert.match(html, /data-tab="favorites"/);
   assert.match(app, /function favoriteIdentity/);
+  assert.match(app, /favorite\.datasetId === state\.datasetId/);
+  assert.match(app, /datasetId: state\.datasetId/);
   assert.match(app, /favoriteButton\('archetype', item\.id\)/);
   assert.match(app, /favoriteButton\('variant', entity\.id, variant\.champions/);
   assert.match(app, /function favoritesView/);
@@ -401,4 +403,29 @@ test('archetypes and exact variants persist into a local Favorites meta tab', as
   assert.match(store, /async setFavorite/);
   assert.match(store, /championIds.*\.sort/);
   assert.match(server, /request\.url === '\/api\/favorites'/);
+});
+
+test('Meta keeps a future-proof set dropdown separate from an explicit Live/PBE selector', async () => {
+  const [html, app, server] = await Promise.all([
+    readFile(join(root, 'public', 'index.html'), 'utf8'),
+    readFile(join(root, 'public', 'app.js'), 'utf8'),
+    readFile(join(root, 'src', 'server.mjs'), 'utf8')
+  ]);
+  assert.match(html, /id="set-filter"/);
+  assert.match(html, /id="source-filter"/);
+  assert.doesNotMatch(html, /id="dataset-filter"/);
+  assert.match(html, /raw\.communitydragon\.org/);
+  assert.match(app, /availableSetNumbers/);
+  assert.match(app, /datasetIdFor\(setNumber, source\)/);
+  assert.match(html, /data-source="live"/);
+  assert.match(html, /data-source="pbe"/);
+  assert.match(app, /No hay datos \$\{source\} disponibles para Set/);
+  assert.match(app, /datasetQuery\(\).*dataset=/s);
+  assert.match(app, /ANÁLISIS DE PARTIDAS PBE/);
+  assert.match(app, /isPbeDataset\(\) \? 'PBE' : patchLabel/);
+  assert.match(app, /isPbeDataset\(\) && region === 'PBE'/);
+  assert.match(app, /JSON\.stringify\(\{ datasetId: state\.datasetId \}\)/);
+  assert.match(server, /Math\.floor\(newestBaselineTime \/ 1000\)(?! \+ 1)/);
+  assert.match(server, /set-\\d\+-\(\?:live\|pbe\)/);
+  assert.match(server, /store\.currentSnapshots\(url\.searchParams\.get\('dataset'\)/);
 });

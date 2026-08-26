@@ -12,7 +12,7 @@ All development and testing must run in the repository-owned isolated QA sandbox
 
 The first owner-facing in-place update must include the complete, freshly validated six-region real-data snapshot collected during QA so the product is ready for immediate use without another same-day refresh. Never discard that retrieved dataset. Import it only when newer than the owner's latest local snapshot, while preserving every existing historical snapshot, setting, and encrypted Riot key.
 
-- Phase: TFTTool 0.6.27 is published as a deliberately irrelevant release and is awaiting the owner's independent in-app update result from installed 0.6.26.
+- Phase: the next incremental release is in isolated QA. It adds a separately versioned `Set 18 — PBE` dataset, preserves the canonical `Set 17 — Live` baseline, and does not touch the owner's installation until collection, packaging, automated tests, and visual QA are complete.
 - Branch: `main`.
 - Published release: TFTTool `0.6.27` is available on public `main` with tag `v0.6.27`; `updates/stable.json` references its 93,888,005-byte release asset and SHA-256 `854F8C11FCCDF39DE913DEA0C904E232B2494F274D0644A9C07C90055C536D1C`.
 - GitHub: public `Gabriel-Vasquez/TFTTool`.
@@ -20,6 +20,13 @@ The first owner-facing in-place update must include the complete, freshly valida
 - Owner-data baseline: TFTTool 0.6.26 is installed at `C:\Program Files\TFTTool`. The complete owner state remains at SHA-256 `DA5DB1493A8CD7F1B99DA0AA10BB8FE97AB4DC1214B069ECBF05A8F0708DA2FA` with four snapshots, 24,000 current observations, Spanish preference, five favorites, history, and protected Riot-key availability preserved.
 - Refinement evidence: raw inspection of the preserved 12,000 observations found 7,457 repeated-item slot occurrences across 5,745 boards, including 441 Lulu and 129 Zoe cases. The implementation now keeps global item prevalence board-normalized while preserving repeated slots for composition-specific champion builds.
 - Current-set/current-patch selection is a reusable analysis boundary: when a new TFT set is observed, it is isolated and clustered again through the same deterministic archetype pipeline instead of inheriting old-set boards.
+- Dataset milestone: the secure DPAPI-only QA key probe passed against real Match-v1 data (`PBE1_4531702063`, Set 18). Current PBE matches return complete boards; the known older Unreal-client defect is handled by rejecting empty unit/trait boards while still using participant PUUIDs for deterministic graph discovery. Live and PBE observations, metadata, history, updates, and selectors remain isolated by `set-N-source` identity.
+- Champion presentation is set-scoped as well: portrait, cost, planner code, and localization are resolved from the selected dataset's own metadata. A champion returning in a later set can therefore use different artwork without overwriting or leaking the earlier set's portrait, including across imports and metadata caches.
+- Set and environment are separate, future-proof controls in 0.6.28. The Set dropdown is derived from every set represented by an imported Live or PBE dataset; the distant Live/PBE segmented selector never silently changes source. A clean install therefore opens the highest known set in Live mode even when that exact dataset is empty, and PBE data appears only after an explicit PBE selection. Importing a future `set-N-live` pack immediately fills that existing Live selection without an application release.
+- Favorites are dataset-scoped too. Existing pre-selector favorites migrate intact to Set 17 Live, while new Live/PBE favorites with the same archetype identity coexist independently. Portable metadata imports deep-merge by dataset so a partial data update cannot discard another set's portraits or localization.
+- Dataset ordering is reusable across future transitions: the highest set is selected when no explicit preference exists, and a complete Live dataset outranks PBE for the same set. An explicitly saved Live/PBE choice remains authoritative.
+- Version 0.6.28 is collecting an exact 24,000-observation Set 18 PBE baseline from queue 1090 within the current five-day window. The official Match-v1 endpoint has no pre-detail queue filter, so the collector rejects other PBE modes after detail retrieval, honors Riot's shared regional rate limit, and writes minute-throttled resumable QA checkpoints. Future PBE updates start after the newest retained observation and roll only newer boards into the newest 24,000; a partial graph can never enter the release seed.
+- The 0.6.28 release pipeline refuses to build or publish without both the complete Live baseline and exact Set 18 PBE baseline. Every observed PBE champion must have a set-scoped portrait and Team Planner code in both locales, and every observed item/trait must have imagery; a stale metadata fallback therefore fails safely before replacing valid installed data.
 - Portable `.tftpack` export/import, offline bilingual metadata, a full item-free flagship plus exactly three itemized CORE champions, composition-context champion analysis, symmetric variant diffs, and corrected slider direction are installed.
 - Riot Team Planner metadata and the accepted v2 ten-slot, three-hex-digit-per-champion layout are integrated. The main card exposes Copy Team beneath Power Index; the expanded flagship and every variant expose their own full-lineup export while variants remain flagship-relative add/remove diffs.
 - Team Interactions is installed with complete 24-opponent matchup matrices, region-aware baseline adjustment, reciprocal scores, shrinkage/support thresholds, and opponent-conditioned Counter Items with official item imagery and expandable evidence.
@@ -60,8 +67,8 @@ The first owner-facing in-place update must include the complete, freshly valida
 
 ## Next actions
 
-1. Publish 0.6.27 and stop with the owner installation unchanged at 0.6.26.
-2. Record the owner's independent result after they use the Settings update button.
+1. Repeat the full automated suite and installed visual QA against the completed bilingual 48,000-observation seed and separated Set/environment selectors.
+2. Package 0.6.28 and publish it to the controlled GitHub update channel without touching the owner's installation.
 
 ## Blockers
 
@@ -74,6 +81,9 @@ The first owner-facing in-place update must include the complete, freshly valida
 
 ## Validation
 
+- TFTTool 0.6.28 passes all 131 automated tests and isolated source plus packaged Electron visual QA. Its seed contains exactly 48,000 unique observations across `set-17-live` (24,000) and `set-18-pbe` (24,000), occupies 17,177,632 bytes, and has SHA-256 `CDB44543D5C3664556DF9C43E1359E89DE84315E5F5B903B0839416FBDAADF8D`. Packaged QA verifies the empty Set 18 Live default, explicit-only PBE selection, future-proof Set 18/17 dropdown, 27 PBE and 25 Live compositions, all visible Set 18 portrait URLs, every cost color, minimum 1024-pixel viewport, complete prior interaction/layout/favorite/export contracts, and no horizontal overflow.
+- The self-contained `dist/TFTTool Setup 0.6.28.exe` is 102,672,765 bytes with SHA-256 `783C87B171406401DF066ABD90A734D29AB61E6866F69D58CC83B7D8FBB71527`. Packaged QA used isolated ports and data directories; the owner installation was never installed, closed, updated, or modified.
+- Local persistence now migrates legacy embedded snapshots into one compressed `library.json.gz` transaction. Settings and favorite changes write only the small `state.json`, while a completed data update commits its snapshot and set-scoped metadata together; the isolated primary service startup fell from roughly 29.4 seconds before this repair to 9.8 seconds in the final full-suite pass.
 - TFTTool 0.6.27 is functionally identical to 0.6.26 and passes all 37 focused end-to-end, updater, executable PowerShell handoff/BOM, and UI-contract tests. Its 93,888,005-byte installer has SHA-256 `854F8C11FCCDF39DE913DEA0C904E232B2494F274D0644A9C07C90055C536D1C`. The owner installation remains 0.6.26 for independent validation.
 - Public-channel readiness confirms `stable.json` serves version 0.6.27 with the exact expected size and checksum, and the GitHub release asset reports 93,888,005 bytes. No agent-side update request, installation, application shutdown, or relaunch was performed; owner validation remains pending.
 - TFTTool 0.6.26 is functionally identical to 0.6.25 and passes all 37 focused end-to-end, updater, executable PowerShell handoff/BOM, and UI-contract tests. Its 93,887,950-byte installer has SHA-256 `4A2DC98F75CCD7322AEF6E805C9F5279D126BDF04EB33315672A8433E23DBDD6`.

@@ -8,12 +8,15 @@ import { assessSufficiency } from './domain/stability.mjs';
 import { compareSnapshots } from './domain/history.mjs';
 import { ANALYSIS_VERSION } from './domain/composition.mjs';
 import { isDisplayableUnitId } from './domain/normalization.mjs';
+import { LIVE_DATASET, PBE_SET_18_DATASET, datasetDescriptor } from './domain/dataset.mjs';
 import { ITEM_TAXONOMY_VERSION } from './domain/item-taxonomy.mjs';
 import { LocalStore, hasCompleteRegionalCoverage } from './persistence/store.mjs';
 import { createDataPack, parseDataPack } from './persistence/data-pack.mjs';
 import { importBundledSnapshot } from './persistence/seed.mjs';
 import { REFRESH_CANCELLED, RiotClient } from './riot/client.mjs';
 import { MetadataClient } from './riot/metadata.mjs';
+import { PbeClient } from './riot/pbe-client.mjs';
+import { PbeMetadataClient, assertPbeMetadataCoverage } from './riot/pbe-metadata.mjs';
 import { SecretStore } from './security/secrets.mjs';
 import { UPDATE_MANIFEST_URL, checkForUpdate, downloadVerifiedUpdate } from './update.mjs';
 
@@ -21,6 +24,7 @@ const publicDirectory = join(import.meta.dirname, '..', 'public');
 const store = new LocalStore(dataDirectory);
 const secrets = new SecretStore(dataDirectory);
 const metadata = new MetadataClient(fetch, { cacheDirectory: join(dataDirectory, 'metadata') });
+const pbeMetadata = new PbeMetadataClient(fetch);
 const analysisCache = new Map();
 const job = { state: 'idle', stage: 'idle', regions: {}, error: null, startedAt: null, targetPerRegion: REFRESH_TARGET_PER_REGION, newObservations: 0, progressPercent: 0, cancelRequested: false, checkpointDigest: null };
 let activeRefreshController = null;
@@ -33,32 +37,36 @@ function metadataBreakpoints(value) {
   return Object.fromEntries(Object.values(value?.traits || {}).filter((trait) => trait.breakpoints?.length).map((trait) => [trait.id, trait.breakpoints]));
 }
 
-function portableMetadata(locale, patch) {
-  const value = store.state.portableMetadata?.[locale];
+function portableMetadata(locale, patch, datasetId = LIVE_DATASET) {
+  const value = store.state.portableMetadata?.datasets?.[datasetId]?.[locale] || (!datasetId.endsWith('-pbe') ? store.state.portableMetadata?.[locale] : null);
+  if (datasetId.endsWith('-pbe')) return value?.itemTaxonomyVersion === ITEM_TAXONOMY_VERSION ? value : null;
   const line = String(patch || '').match(/\b\d+\.\d+\b/)?.[0];
   return value && value.itemTaxonomyVersion === ITEM_TAXONOMY_VERSION && (!line || String(value.version || '').startsWith(`${line}.`)) ? value : null;
 }
 
-async function metadataFor(patch, locale) {
-  return portableMetadata(locale, patch) || metadata.load(patch, locale);
+async function metadataFor(patch, locale, datasetId = LIVE_DATASET) {
+  const pbeSetNumber = Number(datasetId.match(/^set-(\d+)-pbe$/)?.[1]);
+  return portableMetadata(locale, patch, datasetId) || (datasetId.endsWith('-pbe') ? pbeMetadata.load(pbeSetNumber, locale) : metadata.load(patch, locale));
 }
 
-async function portableMetadataForSnapshot(snapshot) {
+async function portableMetadataPayloadForSnapshot(snapshot) {
+  const descriptor = datasetDescriptor(snapshot);
   const patch = snapshot?.observations?.[0]?.gameVersion || snapshot?.observations?.[0]?.patch;
-  const entries = await Promise.all(['es_ES', 'en_US'].map(async (locale) => [locale, await metadataFor(patch, locale)]));
+  const entries = await Promise.all(['es_ES', 'en_US'].map(async (locale) => [locale, await metadataFor(patch, locale, descriptor.id)]));
   const values = Object.fromEntries(entries);
-  await store.updatePortableMetadata(values);
-  return values;
+  const datasets = { ...(store.state.portableMetadata.datasets || {}), [descriptor.id]: values };
+  return descriptor.id === LIVE_DATASET ? { ...values, datasets } : { datasets };
 }
 
 async function analysisOptions(observations) {
   try {
-    const localized = await metadataFor(observations[0]?.gameVersion || observations[0]?.patch, 'es_ES');
+    const datasetId = observations[0]?.datasetId || (observations[0]?.source === 'pbe' ? PBE_SET_18_DATASET : LIVE_DATASET);
+    const localized = await metadataFor(observations[0]?.gameVersion || observations[0]?.patch, 'es_ES', datasetId);
     return { traitBreakpoints: metadataBreakpoints(localized), itemMetadata: localized.items || {} };
   } catch { return {}; }
 }
 
-async function refresh(controller) {
+async function refreshLive(controller, requestedDatasetId = LIVE_DATASET) {
   let checkpointForStorage = null;
   try {
     const apiKey = await secrets.getRiotApiKey();
@@ -73,7 +81,7 @@ async function refresh(controller) {
     } });
     const savedCheckpoint = store.state.refreshCheckpoint;
     const checkpointAge = savedCheckpoint?.startedAt ? Date.now() - new Date(savedCheckpoint.startedAt).getTime() : Infinity;
-    const latest = store.latestSnapshot();
+    const latest = store.latestSnapshot(requestedDatasetId);
     const provenanceCompatible = Boolean(latest)
       && latest.collection?.targetPerRegion === REFRESH_TARGET_PER_REGION
       && latest.observations.every((observation) => ['CHALLENGER', 'GRANDMASTER', 'MASTER'].includes(observation.sourceTier))
@@ -93,8 +101,9 @@ async function refresh(controller) {
       }];
     }));
     const checkpointCompatible = checkpointAge <= 6 * 60 * 60 * 1_000
+      && savedCheckpoint?.datasetId === requestedDatasetId
       && savedCheckpoint?.targetPerRegion === REFRESH_TARGET_PER_REGION
-      && savedCheckpoint?.provenanceVersion === 5;
+      && savedCheckpoint?.provenanceVersion === 6;
     const baselineObservationIds = Object.fromEntries(Object.entries(incrementalRegions).map(([region, state]) => [region, new Set(state.observations.map((observation) => observation.id))]));
     const hydrateCheckpointRegion = (region) => {
       const baseline = incrementalRegions[region];
@@ -105,7 +114,7 @@ async function refresh(controller) {
     const { digest: _savedCheckpointDigest, ...savedCheckpointState } = savedCheckpoint || {};
     const checkpoint = checkpointCompatible
       ? { ...savedCheckpointState, regions: Object.fromEntries(Object.keys(REGIONS).map((region) => [region, hydrateCheckpointRegion(region)])) }
-      : { startedAt: job.startedAt, targetPerRegion: REFRESH_TARGET_PER_REGION, provenanceVersion: 5, regions: incrementalRegions };
+      : { datasetId: requestedDatasetId, startedAt: job.startedAt, targetPerRegion: REFRESH_TARGET_PER_REGION, provenanceVersion: 6, regions: incrementalRegions };
     checkpointForStorage = () => {
       const { digest: _checkpointDigest, ...checkpointState } = checkpoint;
       return {
@@ -147,10 +156,16 @@ async function refresh(controller) {
         tierBoundary: tierSummary(observations.filter((entry) => entry.region === region))
       }]))
     };
-    const snapshot = { id: crypto.randomUUID(), createdAt: new Date().toISOString(), observations, result, sufficiency, collection };
+    const setNumber = Number(observations[0]?.setNumber) || Number(String(observations[0]?.set || '').match(/(?:Set)?(\d+)/i)?.[1]);
+    const liveDatasetId = Number.isFinite(setNumber) ? `set-${setNumber}-live` : requestedDatasetId;
+    const snapshot = { id: crypto.randomUUID(), createdAt: new Date().toISOString(), dataset: { id: liveDatasetId, source: 'live', setNumber: Number.isFinite(setNumber) ? setNumber : null, label: Number.isFinite(setNumber) ? `Set ${setNumber} — Live` : 'Live' }, observations, result, sufficiency, collection };
     job.stage = 'saving';
     const completeCoverage = hasCompleteRegionalCoverage(snapshot, Object.keys(REGIONS), REFRESH_TARGET_PER_REGION);
-    if ((sufficiency.publishable && completeCoverage) || QA_ALLOW_SMALL_SNAPSHOTS) { await store.addSnapshot(snapshot); await portableMetadataForSnapshot(snapshot).catch(() => {}); analysisCache.clear(); }
+    if ((sufficiency.publishable && completeCoverage) || QA_ALLOW_SMALL_SNAPSHOTS) {
+      const portable = await portableMetadataPayloadForSnapshot(snapshot).catch(() => null);
+      await store.addSnapshot(snapshot, portable);
+      analysisCache.clear();
+    }
     await store.clearRefreshCheckpoint();
     job.state = 'completed'; job.stage = 'completed'; job.progressPercent = 100; job.completedAt = new Date().toISOString(); job.sufficiency = sufficiency;
   } catch (error) {
@@ -159,6 +174,81 @@ async function refresh(controller) {
       job.state = 'cancelled'; job.stage = 'cancelled'; job.error = null; job.completedAt = new Date().toISOString(); job.checkpointDigest = store.state.refreshCheckpoint?.digest || null;
     } else { job.state = 'failed'; job.stage = 'failed'; job.error = error.message; }
   } finally { if (activeRefreshController === controller) activeRefreshController = null; }
+}
+
+async function refreshPbe(controller, datasetId = PBE_SET_18_DATASET) {
+  let checkpointForStorage = null;
+  try {
+    const setNumber = Number(datasetId.match(/^set-(\d+)-pbe$/)?.[1]);
+    if (!Number.isFinite(setNumber)) throw new Error('PBE_DATASET_INVALID');
+    const apiKey = await secrets.getRiotApiKey();
+    if (!apiKey) throw new Error('RIOT_API_KEY_REQUIRED');
+    job.state = 'running'; job.stage = 'collecting'; job.error = null; job.datasetId = datasetId; job.regions = {}; job.targetPerRegion = 24_000; job.newObservations = 0; job.progressPercent = 0; job.cancelRequested = false;
+    const latest = store.latestSnapshot(datasetId);
+    const baseline = latest?.observations || [];
+    const baselineIds = new Set(baseline.map((entry) => entry.id));
+    const newestBaselineTime = baseline.reduce((latestTime, entry) => Math.max(latestTime, Date.parse(entry.recordedAt) || 0), 0);
+    const discoveryStartTime = newestBaselineTime
+      ? Math.floor(newestBaselineTime / 1000)
+      : Math.floor(Date.now() / 1000) - (5 * 24 * 60 * 60);
+    const saved = store.state.refreshCheckpoint?.datasetId === datasetId ? store.state.refreshCheckpoint : null;
+    const resume = saved ? {
+      ...saved.state,
+      observations: [...new Map([...baseline, ...(saved.state.observations || [])].map((entry) => [entry.id, entry])).values()],
+      processedMatches: [...new Set([...baseline.map((entry) => entry.matchId).filter(Boolean), ...(saved.state.processedMatches || [])])]
+    } : {
+      observations: baseline,
+      processedMatches: [...new Set(baseline.map((entry) => entry.matchId).filter(Boolean))],
+      discoveredMatches: latest ? [] : undefined,
+      queuedPlayers: [...new Set(baseline.map((entry) => entry.playerId).filter(Boolean))]
+    };
+    const client = new PbeClient(apiKey, { setNumber, signal: controller.signal, onProgress: (progress) => {
+      job.regions.PBE = progress;
+      job.newObservations = Math.max(0, (progress.observations || 0) - baselineIds.size);
+      job.progressPercent = latest ? Math.min(99, Math.round(((progress.playersScanned || 0) / 40) * 100)) : progress.progressPercent || 0;
+    } });
+    let lastCheckpointAt = 0;
+    const collected = await client.sample({ target: 24_000, maxPlayers: 400, startTime: discoveryStartTime, minimumPlayersToScan: latest ? 40 : 0, resume, checkpoint: async (state) => {
+      checkpointForStorage = { datasetId, startedAt: job.startedAt, state: { ...state, observations: (state.observations || []).filter((entry) => !baselineIds.has(entry.id)) } };
+      if (Date.now() - lastCheckpointAt >= 60_000) { lastCheckpointAt = Date.now(); await store.saveRefreshCheckpoint(checkpointForStorage); }
+    } });
+    if (collected.observations.length !== 24_000 && !QA_ALLOW_SMALL_SNAPSHOTS) {
+      if (checkpointForStorage) await store.saveRefreshCheckpoint(checkpointForStorage);
+      throw new Error('PBE_DATASET_INCOMPLETE');
+    }
+    job.stage = 'processing';
+    const freshPbeMetadata = Object.fromEntries(await Promise.all(['es_ES', 'en_US'].map(async (locale) => {
+      const localized = await pbeMetadata.load(setNumber, locale, { force: true }).catch(() => portableMetadata(locale, null, datasetId));
+      if (!localized) throw new Error('PBE_SET_METADATA_UNAVAILABLE');
+      return [locale, localized];
+    })));
+    for (const [locale, localized] of Object.entries(freshPbeMetadata)) assertPbeMetadataCoverage(collected.observations, localized, locale);
+    const options = { traitBreakpoints: metadataBreakpoints(freshPbeMetadata.es_ES), itemMetadata: freshPbeMetadata.es_ES.items || {} };
+    const analyzed = analyzeCurrentSet(collected.observations, 0.5, options);
+    const sufficiency = assessSufficiency(analyzed.observations, analyzed.result, ['PBE']);
+    const snapshot = {
+      id: crypto.randomUUID(), createdAt: new Date().toISOString(),
+      dataset: { id: datasetId, source: 'pbe', setNumber, label: `Set ${setNumber} — PBE` },
+      observations: analyzed.observations, result: analyzed.result, sufficiency,
+      collection: { mode: latest ? 'pbe_incremental_graph' : 'pbe_match_graph', source: 'pbe', target: 24_000, ...collected.coverage }
+    };
+    job.stage = 'saving';
+    if (sufficiency.publishable || QA_ALLOW_SMALL_SNAPSHOTS) {
+      await store.addSnapshot(snapshot, { datasets: { ...(store.state.portableMetadata.datasets || {}), [datasetId]: freshPbeMetadata } });
+      analysisCache.clear();
+    }
+    await store.clearRefreshCheckpoint();
+    job.state = 'completed'; job.stage = 'completed'; job.progressPercent = 100; job.completedAt = new Date().toISOString(); job.sufficiency = sufficiency;
+  } catch (error) {
+    if (error.message === REFRESH_CANCELLED) {
+      if (checkpointForStorage) await store.saveRefreshCheckpoint(checkpointForStorage);
+      job.state = 'cancelled'; job.stage = 'cancelled'; job.error = null; job.completedAt = new Date().toISOString();
+    } else { job.state = 'failed'; job.stage = 'failed'; job.error = error.message; }
+  } finally { if (activeRefreshController === controller) activeRefreshController = null; }
+}
+
+async function refresh(controller, datasetId = LIVE_DATASET) {
+  return datasetId.endsWith('-pbe') ? refreshPbe(controller, datasetId) : refreshLive(controller, datasetId);
 }
 
 export async function serveStatic(request, response) {
@@ -171,7 +261,7 @@ export async function serveStatic(request, response) {
 
 function requestedSnapshot(url) {
   const id = url.searchParams.get('snapshot');
-  return id ? store.state.snapshots.find((snapshot) => snapshot.id === id) : store.latestSnapshot();
+  return id ? store.state.snapshots.find((snapshot) => snapshot.id === id) : store.latestSnapshot(url.searchParams.get('dataset') || store.defaultDatasetId());
 }
 
 function responseResult(result) {
@@ -185,7 +275,9 @@ function resultFor(snapshot, region = 'GLOBAL') {
   const key = `${snapshot.id}:${region}`;
   if (!analysisCache.has(key)) {
     const observations = snapshot.observations.filter((item) => item.region === region);
-    analysisCache.set(key, aggregate(observations, 0.5, { traitBreakpoints: snapshot.result.traitBreakpoints || {}, itemMetadata: store.state.portableMetadata?.es_ES?.items || {} }));
+    const descriptor = datasetDescriptor(snapshot);
+    const itemMetadata = portableMetadata('es_ES', observations[0]?.patch, descriptor.id)?.items || {};
+    analysisCache.set(key, aggregate(observations, 0.5, { traitBreakpoints: snapshot.result.traitBreakpoints || {}, itemMetadata }));
   }
   return analysisCache.get(key);
 }
@@ -196,7 +288,7 @@ function analysisFor(url) {
   const region = url.searchParams.get('region') || 'GLOBAL';
   const observations = region === 'GLOBAL' ? snapshot.observations : snapshot.observations.filter((item) => item.region === region);
   const result = resultFor(snapshot, region);
-  return { id: snapshot.id, createdAt: snapshot.createdAt, patch: observations[0]?.patch || null, set: observations[0]?.set || null, sufficiency: snapshot.sufficiency, result: responseResult(result), regions: [...new Set(observations.map((item) => item.region))] };
+  return { id: snapshot.id, createdAt: snapshot.createdAt, dataset: datasetDescriptor(snapshot), patch: observations[0]?.patch || null, set: observations[0]?.set || null, sufficiency: snapshot.sufficiency, result: responseResult(result), regions: [...new Set(observations.map((item) => item.region))] };
 }
 
 function evidenceFor(url) {
@@ -226,10 +318,10 @@ export async function createTftServer({ onShutdown = () => {}, onInstallUpdate =
       return { ...snapshot, observations };
     });
     for (const snapshot of store.state.snapshots) snapshot.result = aggregate(snapshot.observations, 0.5, await analysisOptions(snapshot.observations));
-    store.state.version = 11;
+    store.state.version = 12;
     await store.save();
   }
-  else if ((store.state.version || 1) < 11) { store.state.version = 11; await store.save(); }
+  else if ((store.state.version || 1) < 12) { store.state.version = 12; await store.save(); }
   const appUpdate = { state: 'idle', currentVersion: APP_VERSION, availableVersion: null, downloadedBytes: 0, totalBytes: 0, error: null };
   const startAppUpdate = () => {
     if (['checking', 'downloading', 'installing'].includes(appUpdate.state)) return false;
@@ -251,20 +343,28 @@ export async function createTftServer({ onShutdown = () => {}, onInstallUpdate =
     const url = new URL(request.url, 'http://127.0.0.1');
     if (['POST', 'PUT', 'DELETE'].includes(request.method) && !trustedLocalMutation(request)) return json(response, 403, { error: 'untrusted_origin' });
     if (request.method === 'GET' && request.url === '/api/health') return json(response, 200, { ok: true, service: 'tfttool' });
-    if (request.method === 'GET' && request.url === '/api/bootstrap') return json(response, 200, { appVersion: APP_VERSION, settings: store.state.settings, favorites: store.state.favorites, refresh: job, appUpdate, hasApiKey: Boolean(await secrets.getRiotApiKey()) });
+    if (request.method === 'GET' && request.url === '/api/bootstrap') return json(response, 200, { appVersion: APP_VERSION, settings: store.state.settings, datasets: store.datasets(), defaultDatasetId: store.defaultDatasetId(), favorites: store.state.favorites, refresh: job, appUpdate, hasApiKey: Boolean(await secrets.getRiotApiKey()) });
     if (request.method === 'GET' && request.url === '/api/refresh') return json(response, 200, job);
     if (request.method === 'GET' && request.url === '/api/app-update') return json(response, 200, appUpdate);
     if (request.method === 'POST' && request.url === '/api/app-update') { const started = startAppUpdate(); return json(response, started ? 202 : 409, appUpdate); }
     if (request.method === 'GET' && url.pathname === '/api/analysis') return json(response, 200, analysisFor(url));
-    if (request.method === 'GET' && url.pathname === '/api/metadata') { const locale = url.searchParams.get('locale') === 'en_US' ? 'en_US' : 'es_ES'; return json(response, 200, await metadataFor(url.searchParams.get('patch'), locale)); }
+    if (request.method === 'GET' && url.pathname === '/api/metadata') { const locale = url.searchParams.get('locale') === 'en_US' ? 'en_US' : 'es_ES'; return json(response, 200, await metadataFor(url.searchParams.get('patch'), locale, url.searchParams.get('dataset') || store.defaultDatasetId() || LIVE_DATASET)); }
     if (request.method === 'GET' && url.pathname === '/api/evidence') return json(response, 200, evidenceFor(url));
-    if (request.method === 'GET' && request.url === '/api/snapshots') return json(response, 200, store.state.snapshots.map((snapshot) => ({ id: snapshot.id, createdAt: snapshot.createdAt, observationCount: snapshot.observations.length, patch: snapshot.observations[0]?.patch || null, set: snapshot.observations[0]?.set || null, sufficiency: snapshot.sufficiency })));
-    if (request.method === 'GET' && url.pathname === '/api/history') { const snapshots = store.currentSnapshots(); return json(response, 200, compareSnapshots(snapshots.at(-2), snapshots.at(-1))); }
+    if (request.method === 'GET' && url.pathname === '/api/snapshots') { const datasetId = url.searchParams.get('dataset'); const snapshots = datasetId ? store.currentSnapshots(datasetId) : store.state.snapshots; return json(response, 200, snapshots.map((snapshot) => ({ id: snapshot.id, createdAt: snapshot.createdAt, dataset: datasetDescriptor(snapshot), observationCount: snapshot.observations.length, patch: snapshot.observations[0]?.patch || null, set: snapshot.observations[0]?.set || null, sufficiency: snapshot.sufficiency }))); }
+    if (request.method === 'GET' && url.pathname === '/api/history') { const snapshots = store.currentSnapshots(url.searchParams.get('dataset') || store.defaultDatasetId()); return json(response, 200, compareSnapshots(snapshots.at(-2), snapshots.at(-1))); }
     if (request.method === 'GET' && url.pathname === '/api/data-pack/export') {
-      const latest = store.latestSnapshot();
-      if (!latest) return json(response, 404, { error: 'DATA_PACK_EMPTY' });
-      const portable = await portableMetadataForSnapshot(latest);
-      const pack = createDataPack({ snapshots: store.state.snapshots, metadata: portable, appVersion: APP_VERSION });
+      if (!store.state.snapshots.length) return json(response, 404, { error: 'DATA_PACK_EMPTY' });
+      let refreshedMetadata = {};
+      for (const dataset of store.datasets()) {
+        const snapshot = store.latestSnapshot(dataset.id);
+        if (!snapshot) continue;
+        const patch = snapshot?.observations?.[0]?.gameVersion || snapshot?.observations?.[0]?.patch;
+        if (['es_ES', 'en_US'].every((locale) => portableMetadata(locale, patch, dataset.id))) continue;
+        const payload = await portableMetadataPayloadForSnapshot(snapshot);
+        refreshedMetadata = { ...refreshedMetadata, ...payload, datasets: { ...(refreshedMetadata.datasets || {}), ...(payload.datasets || {}) } };
+      }
+      if (Object.keys(refreshedMetadata).length) await store.updatePortableMetadata(refreshedMetadata);
+      const pack = createDataPack({ snapshots: store.state.snapshots, metadata: store.state.portableMetadata, appVersion: APP_VERSION });
       const publisherDirectory = join(dataDirectory, 'publisher');
       const publisherFile = join(publisherDirectory, 'latest-export.tftpack');
       await mkdir(publisherDirectory, { recursive: true });
@@ -277,17 +377,19 @@ export async function createTftServer({ onShutdown = () => {}, onInstallUpdate =
     }
     if (request.method === 'POST' && url.pathname === '/api/data-pack/import') {
       const pack = parseDataPack(await binaryBody(request));
-      const traitBreakpoints = metadataBreakpoints(pack.metadata.es_ES);
-      const itemMetadata = pack.metadata.es_ES?.items || {};
-      for (const snapshot of pack.snapshots) if (snapshot.result?.analysisVersion !== ANALYSIS_VERSION) { const analyzed = analyzeCurrentSet(snapshot.observations, 0.5, { traitBreakpoints, itemMetadata }); snapshot.observations = analyzed.observations; snapshot.result = analyzed.result; }
+      for (const snapshot of pack.snapshots) if (snapshot.result?.analysisVersion !== ANALYSIS_VERSION) {
+        const descriptor = datasetDescriptor(snapshot);
+        const localized = pack.metadata.datasets?.[descriptor.id]?.es_ES || pack.metadata.es_ES || {};
+        const analyzed = analyzeCurrentSet(snapshot.observations, 0.5, { traitBreakpoints: metadataBreakpoints(localized), itemMetadata: localized.items || {} }); snapshot.observations = analyzed.observations; snapshot.result = analyzed.result;
+      }
       const imported = await store.importPortableData({ snapshots: pack.snapshots, metadata: pack.metadata });
       analysisCache.clear();
       return json(response, 200, { ...imported, manifest: pack.manifest });
     }
-    if (request.method === 'PUT' && request.url === '/api/settings') { const settings = await body(request); if (settings.language && !['es', 'en'].includes(settings.language)) return json(response, 400, { error: 'language_not_supported' }); if (settings.layout && !['standard', 'compact'].includes(settings.layout)) return json(response, 400, { error: 'layout_not_supported' }); return json(response, 200, await store.updateSettings(settings)); }
+    if (request.method === 'PUT' && request.url === '/api/settings') { const settings = await body(request); if (settings.language && !['es', 'en'].includes(settings.language)) return json(response, 400, { error: 'language_not_supported' }); if (settings.layout && !['standard', 'compact'].includes(settings.layout)) return json(response, 400, { error: 'layout_not_supported' }); if (settings.datasetId) { const selected = String(settings.datasetId).match(/^set-(\d+)-(?:live|pbe)$/); if (!selected || !store.datasets().some((entry) => Number(entry.setNumber) === Number(selected[1]))) return json(response, 400, { error: 'dataset_not_available' }); } return json(response, 200, await store.updateSettings(settings)); }
     if (request.method === 'PUT' && request.url === '/api/favorites') { const payload = await body(request); return json(response, 200, await store.setFavorite(payload.favorite, payload.active)); }
     if (request.method === 'PUT' && request.url === '/api/settings/riot-key') { await secrets.setRiotApiKey((await body(request)).key); return json(response, 204, {}); }
-    if (request.method === 'POST' && request.url === '/api/refresh') { if (['starting', 'running'].includes(job.state)) return json(response, 409, { error: 'refresh_in_progress' }); const controller = new AbortController(); activeRefreshController = controller; Object.assign(job, { state: 'starting', stage: 'starting', error: null, startedAt: new Date().toISOString(), completedAt: null, regions: {}, newObservations: 0, progressPercent: 0, targetPerRegion: REFRESH_TARGET_PER_REGION, cancelRequested: false, checkpointDigest: null }); void refresh(controller); return json(response, 202, { state: 'started' }); }
+    if (request.method === 'POST' && request.url === '/api/refresh') { if (['starting', 'running'].includes(job.state)) return json(response, 409, { error: 'refresh_in_progress' }); const payload = await body(request); const datasetId = payload.datasetId || store.defaultDatasetId() || LIVE_DATASET; if (!/^set-\d+-(?:live|pbe)$/.test(datasetId)) return json(response, 400, { error: 'dataset_not_refreshable' }); const controller = new AbortController(); activeRefreshController = controller; Object.assign(job, { state: 'starting', stage: 'starting', datasetId, error: null, startedAt: new Date().toISOString(), completedAt: null, regions: {}, newObservations: 0, progressPercent: 0, targetPerRegion: datasetId.endsWith('-pbe') ? 24_000 : REFRESH_TARGET_PER_REGION, cancelRequested: false, checkpointDigest: null }); void refresh(controller, datasetId); return json(response, 202, { state: 'started' }); }
     if (request.method === 'POST' && request.url === '/api/refresh/cancel') { if (!['starting', 'running'].includes(job.state) || !activeRefreshController) return json(response, 409, { error: 'refresh_not_running' }); job.cancelRequested = true; job.stage = 'cancelling'; activeRefreshController.abort(); return json(response, 202, { state: 'cancelling' }); }
     if (request.method === 'DELETE' && request.url?.startsWith('/api/snapshots/')) { await store.deleteSnapshot(decodeURIComponent(request.url.slice('/api/snapshots/'.length))); analysisCache.clear(); return json(response, 204, {}); }
     if (request.method === 'DELETE' && request.url === '/api/snapshots') { await store.deleteAllSnapshots(); analysisCache.clear(); return json(response, 204, {}); }

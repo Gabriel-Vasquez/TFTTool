@@ -43,11 +43,22 @@ function command(method, params = {}) {
 
 await command('Runtime.evaluate', { expression: `document.querySelector('#settings-dialog')?.close(); document.querySelector('[data-tab="home"]')?.click()` });
 
+let initialLive;
+deadline = Date.now() + 30_000;
+while (Date.now() < deadline) {
+  const evaluated = await command('Runtime.evaluate', { expression: `({ set:document.querySelector('#set-filter')?.value, source:document.querySelector('[data-source].active')?.dataset.source, liveHasData:document.querySelector('[data-source="live"]')?.classList.contains('has-data'), pbeHasData:document.querySelector('[data-source="pbe"]')?.classList.contains('has-data'), cards:document.querySelectorAll('.comp-card').length, empty:document.querySelector('.empty')?.innerText||'' })`, returnByValue: true });
+  initialLive = evaluated.result.value;
+  if (initialLive.set === '18' && initialLive.source === 'live' && initialLive.cards === 0) break;
+  await new Promise((resolve) => setTimeout(resolve, 100));
+}
+if (initialLive?.set !== '18' || initialLive.source !== 'live' || initialLive.liveHasData || !initialLive.pbeHasData || initialLive.cards !== 0 || !/No hay datos|No data/i.test(initialLive.empty)) throw new Error(`Set 18 did not default explicitly to empty Live data: ${JSON.stringify(initialLive)}`);
+await command('Runtime.evaluate', { expression: `document.querySelector('[data-source="pbe"]')?.click()` });
+
 let state;
 deadline = Date.now() + 30_000;
 while (Date.now() < deadline) {
   const evaluated = await command('Runtime.evaluate', {
-    expression: `({ title: document.title, ready: document.readyState, cards: document.querySelectorAll('.comp-card').length, text: document.body?.innerText || '', observations: document.querySelector('.snapshot-meta .metric strong')?.textContent, oneStars: document.querySelectorAll('.star-level.star-1').length, twoStars: document.querySelectorAll('.star-level.star-2').length, threeStars: document.querySelectorAll('.star-level.star-3').length, oneStarStyle: (() => { const value = getComputedStyle(document.querySelector('.star-level.star-1')); return { color: value.color, opacity: value.opacity }; })(), twoStarStyle: (() => { const value = getComputedStyle(document.querySelector('.star-level.star-2')); return { color: value.color, opacity: value.opacity }; })(), costBorders: Object.fromEntries([1,2,3,4,5].map((cost)=>{const portrait=document.querySelector('.champion-tile.cost-'+cost+' .champion-portrait');const style=portrait?getComputedStyle(portrait):null;return [cost,{count:document.querySelectorAll('.champion-tile.cost-'+cost).length,color:style?.borderColor||null,width:style?.borderWidth||null,outline:style?.outlineWidth||null}]})), brightCore: (()=>{const portrait=document.querySelector('.highlighted-core .champion-portrait');return portrait?getComputedStyle(portrait).filter:null})(), standardCardHeight:document.querySelector('.comp-card .comp-summary')?.getBoundingClientRect().height, width: document.documentElement.scrollWidth, viewport: document.documentElement.clientWidth })`,
+    expression: `({ title: document.title, ready: document.readyState, cards: document.querySelectorAll('.comp-card').length, text: document.body?.innerText || '', observations: document.querySelector('.snapshot-meta .metric strong')?.textContent, oneStars: document.querySelectorAll('.star-level.star-1').length, twoStars: document.querySelectorAll('.star-level.star-2').length, threeStars: document.querySelectorAll('.star-level.star-3').length, oneStarStyle: (() => { const node=document.querySelector('.star-level.star-1'); if(!node)return null; const value=getComputedStyle(node); return { color: value.color, opacity: value.opacity }; })(), twoStarStyle: (() => { const node=document.querySelector('.star-level.star-2'); if(!node)return null; const value=getComputedStyle(node); return { color: value.color, opacity: value.opacity }; })(), costBorders: Object.fromEntries([1,2,3,4,5].map((cost)=>{const portrait=document.querySelector('.champion-tile.cost-'+cost+' .champion-portrait');const style=portrait?getComputedStyle(portrait):null;return [cost,{count:document.querySelectorAll('.champion-tile.cost-'+cost).length,color:style?.borderColor||null,width:style?.borderWidth||null,outline:style?.outlineWidth||null}]})), brightCore: (()=>{const portrait=document.querySelector('.highlighted-core .champion-portrait');return portrait?getComputedStyle(portrait).filter:null})(), standardCardHeight:document.querySelector('.comp-card .comp-summary')?.getBoundingClientRect().height, width: document.documentElement.scrollWidth, viewport: document.documentElement.clientWidth })`,
     returnByValue: true
   });
   state = evaluated.result.value;
@@ -63,6 +74,38 @@ const presentCostsAreAccented = Object.values(state.costBorders).every((entry) =
 const requiredCostsArePresent = [1, 2, 3].every((cost) => state.costBorders[cost]?.count > 0) && [4, 5].some((cost) => state.costBorders[cost]?.count > 0);
 if (!presentCostsAreCorrect || !presentCostsAreAccented || !requiredCostsArePresent || !state.brightCore || state.brightCore === 'none') throw new Error(`Champion cost borders or brilliant CORE treatment are missing: ${JSON.stringify({ costBorders: state.costBorders, brightCore: state.brightCore })}`);
 if (state.width > state.viewport) throw new Error(`Standalone window has horizontal overflow: ${state.width} > ${state.viewport}`);
+
+let pbeDataset;
+deadline = Date.now() + 30_000;
+while (Date.now() < deadline) {
+  const evaluated = await command('Runtime.evaluate', { expression: `(() => { const visible=(selector)=>[...document.querySelectorAll(selector)].filter((entry)=>{const bounds=entry.getBoundingClientRect();return bounds.bottom>0&&bounds.top<innerHeight}); const champions=visible('.champion-portrait'); const items=visible('.champion-item'); return { set:document.querySelector('#set-filter')?.value, sets:[...document.querySelector('#set-filter')?.options||[]].map((option)=>option.value), source:document.querySelector('[data-source].active')?.dataset.source, eyebrow:document.querySelector('.eyebrow')?.textContent, cards:document.querySelectorAll('.comp-card').length, observations:document.querySelector('.snapshot-meta .metric strong')?.textContent, visibleChampionImages:champions.length, loadedChampionImages:champions.filter((image)=>image.complete&&image.naturalWidth>0).length, setScopedChampionImages:champions.filter((image)=>image.src.toLowerCase().includes('/tft18_')).length, visibleItemImages:items.length, loadedItemImages:items.filter((image)=>image.complete&&image.naturalWidth>0).length, width:document.documentElement.scrollWidth, viewport:document.documentElement.clientWidth }; })()`, returnByValue: true });
+  if (!evaluated.result?.value) throw new Error(`PBE visual-state evaluation failed: ${JSON.stringify(evaluated.exceptionDetails || evaluated)}`);
+  pbeDataset = evaluated.result.value;
+  if (pbeDataset.visibleChampionImages > 0 && pbeDataset.loadedChampionImages === pbeDataset.visibleChampionImages && pbeDataset.visibleItemImages > 0 && pbeDataset.loadedItemImages === pbeDataset.visibleItemImages) break;
+  await new Promise((resolve) => setTimeout(resolve, 100));
+}
+if (pbeDataset.set !== '18' || pbeDataset.source !== 'pbe' || !pbeDataset.sets.includes('17') || !/PBE/.test(pbeDataset.eyebrow) || !/^24[.,]000$/.test(pbeDataset.observations) || pbeDataset.cards < 1 || pbeDataset.visibleChampionImages < 1 || pbeDataset.loadedChampionImages !== pbeDataset.visibleChampionImages || pbeDataset.setScopedChampionImages !== pbeDataset.visibleChampionImages || pbeDataset.visibleItemImages < 1 || pbeDataset.loadedItemImages !== pbeDataset.visibleItemImages || pbeDataset.width > pbeDataset.viewport) throw new Error(`Set 18 PBE did not load with its complete set-scoped dataset and portraits: ${JSON.stringify(pbeDataset)}`);
+await command('Emulation.setDeviceMetricsOverride', { width: 1024, height: 680, deviceScaleFactor: 1, mobile: false });
+const minimumViewport = (await command('Runtime.evaluate', { expression: `({ width:document.documentElement.scrollWidth, viewport:document.documentElement.clientWidth, topActionsWidth:document.querySelector('.top-actions')?.getBoundingClientRect().width, mainWidth:document.querySelector('main')?.getBoundingClientRect().width })`, returnByValue: true })).result.value;
+await command('Emulation.clearDeviceMetricsOverride');
+if (minimumViewport.width > minimumViewport.viewport || minimumViewport.topActionsWidth > minimumViewport.mainWidth) throw new Error(`Set selector overflows the minimum supported window: ${JSON.stringify(minimumViewport)}`);
+await command('Runtime.evaluate', { expression: `(() => { const selector=document.querySelector('#set-filter'); selector.value='17'; selector.dispatchEvent(new Event('change',{bubbles:true})); })()` });
+deadline = Date.now() + 30_000;
+while (Date.now() < deadline) {
+  const evaluated = await command('Runtime.evaluate', { expression: `({ set:document.querySelector('#set-filter')?.value, source:document.querySelector('[data-source].active')?.dataset.source, cards:document.querySelectorAll('.comp-card').length })`, returnByValue: true });
+  const unavailablePbe = evaluated.result.value;
+  if (unavailablePbe.set === '17' && unavailablePbe.source === 'pbe' && unavailablePbe.cards === 0) break;
+  await new Promise((resolve) => setTimeout(resolve, 100));
+}
+await command('Runtime.evaluate', { expression: `document.querySelector('[data-source="live"]')?.click()` });
+deadline = Date.now() + 30_000;
+while (Date.now() < deadline) {
+  const evaluated = await command('Runtime.evaluate', { expression: `({ set:document.querySelector('#set-filter')?.value, source:document.querySelector('[data-source].active')?.dataset.source, cards:document.querySelectorAll('.comp-card').length, observations:document.querySelector('.snapshot-meta .metric strong')?.textContent, standardCardHeight:document.querySelector('.comp-card .comp-summary')?.getBoundingClientRect().height, width:document.documentElement.scrollWidth, viewport:document.documentElement.clientWidth })`, returnByValue: true });
+  const live = evaluated.result.value;
+  if (live.set === '17' && live.source === 'live' && live.cards === 25 && /^24[.,]000$/.test(live.observations)) { state = { ...state, ...live }; break; }
+  await new Promise((resolve) => setTimeout(resolve, 100));
+}
+if (state.set !== '17' || state.source !== 'live' || state.cards !== 25 || state.width > state.viewport) throw new Error(`Set 17 Live did not remain complete after explicit source switching: ${JSON.stringify(state)}`);
 
 await command('Runtime.evaluate', { expression: `(() => { const card = document.querySelector('[data-composition-id="core:TFT17_MissFortune+TFT17_Ornn+TFT17_Viktor"]'); if (card?.getAttribute('aria-expanded') !== 'true') card?.click(); })()` });
 let visibleVariants = 0;
@@ -198,7 +241,7 @@ if (screenshotPath) {
   await writeFile(screenshotPath, Buffer.from(capture.data, 'base64'));
 }
 
-const result = { ok: true, targetType: target.type, url: target.url, title: state.title, observations: state.observations, cards: state.cards, oneStars: state.oneStars, twoStars: state.twoStars, threeStars: state.threeStars, oneStarStyle: state.oneStarStyle, twoStarStyle: state.twoStarStyle, costBorders: state.costBorders, visibleVariants, variantCores, emblemModel, namiEmblemBadges, championItemWeighting, detailBackdropClosed, favorites, persistedFavorites, invalidItems, itemFilters, itemFilterTypes, componentRows, componentRecipes, filteredArtifacts, zedCards, synergyFilter, synergyFiltered, standardCardHeight: state.standardCardHeight, compact, persistedLayout, removedProgression, controls, dialogBackdrops, horizontalOverflow: false };
+const result = { ok: true, targetType: target.type, url: target.url, title: state.title, initialLive, observations: state.observations, cards: state.cards, pbeDataset, minimumViewport, oneStars: state.oneStars, twoStars: state.twoStars, threeStars: state.threeStars, oneStarStyle: state.oneStarStyle, twoStarStyle: state.twoStarStyle, costBorders: state.costBorders, visibleVariants, variantCores, emblemModel, namiEmblemBadges, championItemWeighting, detailBackdropClosed, favorites, persistedFavorites, invalidItems, itemFilters, itemFilterTypes, componentRows, componentRecipes, filteredArtifacts, zedCards, synergyFilter, synergyFiltered, standardCardHeight: state.standardCardHeight, compact, persistedLayout, removedProgression, controls, dialogBackdrops, horizontalOverflow: false };
 if (screenshotPath) await writeFile(`${screenshotPath}.json`, JSON.stringify(result));
 console.log(JSON.stringify(result));
 socket.close();
