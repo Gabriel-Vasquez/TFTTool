@@ -1,7 +1,7 @@
 import { buildTeamCode } from './team-code.js';
 
 const ITEM_FILTER_TYPES = ['regular', 'emblem', 'radiant', 'artifact', 'support', 'set_mechanic', 'unknown'];
-const state = { tab: 'home', bootstrap: null, analysis: null, history: null, metadata: null, datasetId: null, search: '', region: 'GLOBAL', weight: 50, championItemWeight: 100, snapshotId: null, keyPrompted: false, keySaving: false, refresh: null, refreshWasRunning: false, pollTimer: null, updatePollTimer: null, dataPackStatus: '', copyStatus: '', itemTypes: new Set(ITEM_FILTER_TYPES), selectedSynergies: new Set(), synergyMenuOpen: false, expandedCompositions: new Set(), expandedInteractions: new Set() };
+const state = { tab: 'home', bootstrap: null, analysis: null, history: null, metadata: null, datasetId: null, selectedSetBySource: { live: null, pbe: null }, search: '', region: 'GLOBAL', weight: 50, championItemWeight: 100, snapshotId: null, keyPrompted: false, keySaving: false, refresh: null, refreshWasRunning: false, pollTimer: null, updatePollTimer: null, dataPackStatus: '', copyStatus: '', itemTypes: new Set(ITEM_FILTER_TYPES), selectedSynergies: new Set(), synergyMenuOpen: false, expandedCompositions: new Set(), expandedInteractions: new Set() };
 const copy = {
   es: { home: 'Meta actual', homeNav: 'Meta', favorites: 'Favoritos', items: 'Objetos', champions: 'Campeones', synergies: 'Sinergias', interactions: 'Interacciones', history: 'Historial', settings: 'Ajustes', eyebrow: 'ANÁLISIS DE ÉLITE', globalRegions: 'Global · todas las regiones', update: 'Actualizar datos', establishedMeta: 'Meta establecido', performance: 'Rendimiento', noData: 'Aún no hay una instantánea de meta', noDataDetail: 'Añade tu clave de Riot Games y pulsa Actualizar datos. El análisis usa exclusivamente partidas clasificatorias recientes y datos oficiales.', configure: 'Configurar clave de Riot', observations: 'observaciones', average: 'Posición media', top4: 'Top 4', win: 'Victoria', score: 'Puntuación meta', prevalence: 'Prevalencia', variants: 'variantes', patch: 'Parche', updated: 'Actualizado', compositions: 'Composiciones', noResults: 'Sin resultados', noResultsDetail: 'No hay resultados para el filtro actual.', evidence: 'EVIDENCIA Y DESGLOSE', sourceGames: 'Partidas fuente', officialIntegration: 'INTEGRACIÓN OFICIAL', riotKey: 'Clave de Riot Games', keySafety: 'Se cifra localmente para tu cuenta de Windows. Nunca se envía fuera de Riot ni se guarda en el repositorio.', saveRefresh: 'Guardar y actualizar', closeServer: 'Cerrar TFTTool', language: 'Idioma', preferences: 'PREFERENCIAS LOCALES', searchPlaceholder: 'Buscar campeones, objetos, sinergias o interacciones', expand: 'Ver variantes', collapse: 'Ocultar variantes' },
   en: { home: 'Current meta', homeNav: 'Meta', favorites: 'Favorites', items: 'Items', champions: 'Champions', synergies: 'Synergies', interactions: 'Team Interactions', history: 'History', settings: 'Settings', eyebrow: 'ELITE ANALYSIS', globalRegions: 'Global · all regions', update: 'Update data', establishedMeta: 'Established meta', performance: 'Performance', noData: 'No meta snapshot yet', noDataDetail: 'Add your Riot Games key and press Update data. Analysis uses only recent ranked games and official data.', configure: 'Configure Riot key', observations: 'observations', average: 'Average placement', top4: 'Top 4', win: 'Win rate', score: 'Meta score', prevalence: 'Prevalence', variants: 'variants', patch: 'Patch', updated: 'Updated', compositions: 'Compositions', noResults: 'No results', noResultsDetail: 'There are no results for the current filter.', evidence: 'EVIDENCE AND BREAKDOWN', sourceGames: 'Source games', officialIntegration: 'OFFICIAL INTEGRATION', riotKey: 'Riot Games key', keySafety: 'It is encrypted locally for your Windows account. It is never sent anywhere except Riot or stored in the repository.', saveRefresh: 'Save and update', closeServer: 'Close TFTTool', language: 'Language', preferences: 'LOCAL PREFERENCES', searchPlaceholder: 'Search champions, items, traits, or interactions', expand: 'Show variants', collapse: 'Hide variants' }
@@ -19,7 +19,7 @@ function text(key) { return copy[language()][key] || key; }
 function datasetQuery() { return `dataset=${encodeURIComponent(state.datasetId || '')}`; }
 function datasetParts(datasetId = state.datasetId) { const match = String(datasetId || '').match(/^set-(\d+)-(live|pbe)$/); return match ? { setNumber: Number(match[1]), source: match[2] } : { setNumber: null, source: 'live' }; }
 function datasetIdFor(setNumber, source) { return `set-${Number(setNumber)}-${source === 'pbe' ? 'pbe' : 'live'}`; }
-function availableSetNumbers(datasets = state.bootstrap?.datasets || []) { return [...new Set(datasets.map((dataset) => Number(dataset.setNumber)).filter(Number.isFinite))].sort((left, right) => right - left); }
+function availableSetNumbers(datasets = state.bootstrap?.datasets || [], source = 'live') { const eligible = source === 'pbe' ? datasets.filter((dataset) => dataset.source === 'pbe') : datasets; return [...new Set(eligible.map((dataset) => Number(dataset.setNumber)).filter(Number.isFinite))].sort((left, right) => right - left); }
 function datasetHasData(setNumber, source) { return (state.bootstrap?.datasets || []).some((dataset) => Number(dataset.setNumber) === Number(setNumber) && dataset.source === source); }
 function isPbeDataset() { return state.datasetId?.endsWith('-pbe'); }
 function globalRegionLabel() { return isPbeDataset() ? (language() === 'es' ? 'PBE · todas las partidas' : 'PBE · all matches') : text('globalRegions'); }
@@ -352,10 +352,13 @@ function renderRefreshProgress(snapshot = state.analysis) {
 
 async function load() {
   const [bootstrap, allSnapshots] = await Promise.all([api('/api/bootstrap'), api('/api/snapshots')]);
-  const sets = availableSetNumbers(bootstrap.datasets);
   const remembered = datasetParts(state.datasetId || bootstrap.settings.datasetId || bootstrap.defaultDatasetId);
-  const selectedSet = sets.includes(remembered.setNumber) ? remembered.setNumber : sets[0];
+  const sets = availableSetNumbers(bootstrap.datasets, remembered.source);
+  const sourceSet = state.selectedSetBySource[remembered.source];
+  const desiredSet = Number.isFinite(sourceSet) ? sourceSet : remembered.setNumber;
+  const selectedSet = sets.includes(desiredSet) ? desiredSet : sets[0] ?? desiredSet;
   state.datasetId = Number.isFinite(selectedSet) ? datasetIdFor(selectedSet, remembered.source) : null;
+  state.selectedSetBySource[remembered.source] = selectedSet;
   const query = datasetQuery();
   const snapshots = allSnapshots.filter((snapshot) => snapshot.dataset?.id === state.datasetId);
   state.bootstrap = { ...bootstrap, snapshots }; state.refresh = bootstrap.refresh;
@@ -366,6 +369,7 @@ async function load() {
   const selected = datasetParts();
   const setFilter = $('#set-filter');
   setFilter.innerHTML = sets.map((setNumber) => `<option value="${setNumber}">Set ${setNumber}</option>`).join(''); setFilter.value = String(selected.setNumber || '');
+  $('.set-filter span').textContent = `Set · ${selected.source.toUpperCase()}`;
   $('.source-filter-label').textContent = language() === 'es' ? 'Entorno' : 'Environment';
   $('#source-filter').setAttribute('aria-label', language() === 'es' ? 'Entorno de datos' : 'Data environment');
   document.querySelectorAll('[data-source]').forEach((button) => {
@@ -618,9 +622,9 @@ $('#detail-body').addEventListener('input', (event) => { if (event.target.matche
 $('#language-toggle').addEventListener('click', async () => { await api('/api/settings', { method: 'PUT', body: JSON.stringify({ language: language() === 'es' ? 'en' : 'es' }) }); await load(); });
 $('#layout-selector').addEventListener('change', async (event) => { const settings = await api('/api/settings', { method: 'PUT', body: JSON.stringify({ layout: event.target.value }) }); state.bootstrap.settings = settings; state.expandedCompositions.clear(); render(); });
 $('#region-filter').addEventListener('change', async (event) => { state.region = event.target.value; state.expandedCompositions.clear(); state.expandedInteractions.clear(); await load(); });
-async function selectDataset(setNumber, source) { state.datasetId = datasetIdFor(setNumber, source); state.region = 'GLOBAL'; state.snapshotId = null; state.selectedSynergies.clear(); state.itemTypes = new Set(ITEM_FILTER_TYPES); state.expandedCompositions.clear(); state.expandedInteractions.clear(); await api('/api/settings', { method: 'PUT', body: JSON.stringify({ datasetId: state.datasetId }) }); await load(); }
+async function selectDataset(setNumber, source) { state.selectedSetBySource[source] = setNumber; state.datasetId = datasetIdFor(setNumber, source); state.region = 'GLOBAL'; state.snapshotId = null; state.selectedSynergies.clear(); state.itemTypes = new Set(ITEM_FILTER_TYPES); state.expandedCompositions.clear(); state.expandedInteractions.clear(); await api('/api/settings', { method: 'PUT', body: JSON.stringify({ datasetId: state.datasetId }) }); await load(); }
 $('#set-filter').addEventListener('change', async (event) => { await selectDataset(Number(event.target.value), datasetParts().source); });
-$('#source-filter').addEventListener('click', async (event) => { const button = event.target.closest('[data-source]'); if (!button || button.dataset.source === datasetParts().source) return; await selectDataset(datasetParts().setNumber, button.dataset.source); });
+$('#source-filter').addEventListener('click', async (event) => { const button = event.target.closest('[data-source]'); if (!button || button.dataset.source === datasetParts().source) return; const source = button.dataset.source; const currentSet = datasetParts().setNumber; const sets = availableSetNumbers(state.bootstrap?.datasets, source); const rememberedSet = state.selectedSetBySource[source]; const selectedSet = sets.includes(rememberedSet) ? rememberedSet : sets.includes(currentSet) ? currentSet : sets[0] ?? currentSet; await selectDataset(selectedSet, source); });
 $('#update').addEventListener('click', async () => { if (!state.bootstrap.hasApiKey) return openKey(); await startRefresh(); });
 $('#progress').addEventListener('click', async (event) => { if (event.target.closest('[data-cancel-refresh]')) await cancelRefresh(); });
 $('#content').addEventListener('click', async (event) => {

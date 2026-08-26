@@ -12,7 +12,7 @@ All development and testing must run in the repository-owned isolated QA sandbox
 
 The first owner-facing in-place update must include the complete, freshly validated six-region real-data snapshot collected during QA so the product is ready for immediate use without another same-day refresh. Never discard that retrieved dataset. Import it only when newer than the owner's latest local snapshot, while preserving every existing historical snapshot, setting, and encrypted Riot key.
 
-- Phase: the next incremental release is in isolated QA. It adds a separately versioned `Set 18 — PBE` dataset, preserves the canonical `Set 17 — Live` baseline, and does not touch the owner's installation until collection, packaging, automated tests, and visual QA are complete.
+- Phase: 0.6.29 passed isolated automated and packaged visual QA as a two-correction incremental over 0.6.28: source-specific Set selection and readable inactive selector text. The owner's installation remains untouched pending publication.
 - Branch: `main`.
 - Published release: TFTTool `0.6.27` is available on public `main` with tag `v0.6.27`; `updates/stable.json` references its 93,888,005-byte release asset and SHA-256 `854F8C11FCCDF39DE913DEA0C904E232B2494F274D0644A9C07C90055C536D1C`.
 - GitHub: public `Gabriel-Vasquez/TFTTool`.
@@ -23,6 +23,7 @@ The first owner-facing in-place update must include the complete, freshly valida
 - Dataset milestone: the secure DPAPI-only QA key probe passed against real Match-v1 data (`PBE1_4531702063`, Set 18). Current PBE matches return complete boards; the known older Unreal-client defect is handled by rejecting empty unit/trait boards while still using participant PUUIDs for deterministic graph discovery. Live and PBE observations, metadata, history, updates, and selectors remain isolated by `set-N-source` identity.
 - Champion presentation is set-scoped as well: portrait, cost, planner code, and localization are resolved from the selected dataset's own metadata. A champion returning in a later set can therefore use different artwork without overwriting or leaking the earlier set's portrait, including across imports and metadata caches.
 - Set and environment are separate, future-proof controls in 0.6.28. The Set dropdown is derived from every set represented by an imported Live or PBE dataset; the distant Live/PBE segmented selector never silently changes source. A clean install therefore opens the highest known set in Live mode even when that exact dataset is empty, and PBE data appears only after an explicit PBE selection. Importing a future `set-N-live` pack immediately fills that existing Live selection without an application release.
+- Version 0.6.29 gives Live and PBE independent Set selections. PBE lists its own represented sets and returns to its last selected Set, while Live continues to expose the newest known Set even before Live observations exist. Inactive environment text and every native Set option use explicit high-contrast colors.
 - Favorites are dataset-scoped too. Existing pre-selector favorites migrate intact to Set 17 Live, while new Live/PBE favorites with the same archetype identity coexist independently. Portable metadata imports deep-merge by dataset so a partial data update cannot discard another set's portraits or localization.
 - Dataset ordering is reusable across future transitions: the highest set is selected when no explicit preference exists, and a complete Live dataset outranks PBE for the same set. An explicitly saved Live/PBE choice remains authoritative.
 - Version 0.6.28 is collecting an exact 24,000-observation Set 18 PBE baseline from queue 1090 within the current five-day window. The official Match-v1 endpoint has no pre-detail queue filter, so the collector rejects other PBE modes after detail retrieval, honors Riot's shared regional rate limit, and writes minute-throttled resumable QA checkpoints. Future PBE updates start after the newest retained observation and roll only newer boards into the newest 24,000; a partial graph can never enter the release seed.
@@ -67,8 +68,8 @@ The first owner-facing in-place update must include the complete, freshly valida
 
 ## Next actions
 
-1. Monitor the 0.6.28 production-BETA release and import Set 18 Live data once high-rank observations become available.
-2. Keep PBE selection explicit; never substitute it automatically when a selected Live dataset is empty.
+1. Publish the focused 0.6.29 update through the controlled GitHub channel.
+2. Import Set 18 Live data once high-rank observations become available.
 
 ## Blockers
 
@@ -81,6 +82,8 @@ The first owner-facing in-place update must include the complete, freshly valida
 
 ## Validation
 
+- TFTTool 0.6.29 passes the complete 131-test regression inventory after correcting its version fixture, plus isolated source and packaged Electron visual QA. PBE exposes only its represented Set 18, Live retains its independently selected Set 17, source switching restores each choice, and the selector renders inactive environment text as `rgb(203, 211, 225)` plus options as `rgb(245, 217, 129)` over `rgb(21, 26, 37)`. All 48,000 observations and prior packaged UI contracts remain intact.
+- The self-contained `dist/TFTTool Setup 0.6.29.exe` is 102,673,427 bytes with SHA-256 `EC5702B0982271EE0EEBEC7C036AA1087D162C4CCA5506E9C1E06BA9AA687186`. Packaged QA used isolated application and Electron profile directories; the already-running owner installation was not closed, relaunched, updated, or modified.
 - TFTTool 0.6.28 passes all 131 automated tests and isolated source plus packaged Electron visual QA. Its seed contains exactly 48,000 unique observations across `set-17-live` (24,000) and `set-18-pbe` (24,000), occupies 17,177,632 bytes, and has SHA-256 `CDB44543D5C3664556DF9C43E1359E89DE84315E5F5B903B0839416FBDAADF8D`. Packaged QA verifies the empty Set 18 Live default, explicit-only PBE selection, future-proof Set 18/17 dropdown, 27 PBE and 25 Live compositions, all visible Set 18 portrait URLs, every cost color, minimum 1024-pixel viewport, complete prior interaction/layout/favorite/export contracts, and no horizontal overflow.
 - The self-contained `dist/TFTTool Setup 0.6.28.exe` is 102,672,765 bytes with SHA-256 `783C87B171406401DF066ABD90A734D29AB61E6866F69D58CC83B7D8FBB71527`. Packaged QA used isolated ports and data directories; the owner installation was never installed, closed, updated, or modified.
 - Public-channel readiness confirms `stable.json` serves version 0.6.28 only after the GitHub release asset was uploaded with the exact expected 102,672,765-byte size and SHA-256 digest. No agent-side update request, installation, application shutdown, or relaunch was performed.

@@ -416,6 +416,9 @@ test('Meta keeps a future-proof set dropdown separate from an explicit Live/PBE 
   assert.doesNotMatch(html, /id="dataset-filter"/);
   assert.match(html, /raw\.communitydragon\.org/);
   assert.match(app, /availableSetNumbers/);
+  assert.match(app, /selectedSetBySource/);
+  assert.match(app, /source === 'pbe' \? datasets\.filter/);
+  assert.match(app, /sets\.includes\(rememberedSet\)/);
   assert.match(app, /datasetIdFor\(setNumber, source\)/);
   assert.match(html, /data-source="live"/);
   assert.match(html, /data-source="pbe"/);
