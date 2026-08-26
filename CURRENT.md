@@ -12,9 +12,9 @@ All development and testing must run in the repository-owned isolated QA sandbox
 
 The first owner-facing in-place update must include the complete, freshly validated six-region real-data snapshot collected during QA so the product is ready for immediate use without another same-day refresh. Never discard that retrieved dataset. Import it only when newer than the owner's latest local snapshot, while preserving every existing historical snapshot, setting, and encrypted Riot key.
 
-- Phase: 0.6.29 passed isolated automated and packaged visual QA as a two-correction incremental over 0.6.28: source-specific Set selection and readable inactive selector text. The owner's installation remains untouched pending publication.
+- Phase: 0.6.29 is published after isolated automated and packaged visual QA as a two-correction incremental over 0.6.28: source-specific Set selection and readable inactive selector text. The owner's installation remains untouched.
 - Branch: `main`.
-- Published release: TFTTool `0.6.27` is available on public `main` with tag `v0.6.27`; `updates/stable.json` references its 93,888,005-byte release asset and SHA-256 `854F8C11FCCDF39DE913DEA0C904E232B2494F274D0644A9C07C90055C536D1C`.
+- Published release: TFTTool `0.6.29` is available on public `main` with tag `v0.6.29`; `updates/stable.json` references its 102,673,427-byte release asset and SHA-256 `EC5702B0982271EE0EEBEC7C036AA1087D162C4CCA5506E9C1E06BA9AA687186`.
 - GitHub: public `Gabriel-Vasquez/TFTTool`.
 - Implemented and installed: official multi-region Riot ingestion, protected local key storage and invalid-key replacement, full baseline plus incremental diff refresh, deterministic current-set archetypes, real trait breakpoints, exact prevalence/raw-placement weighting, TFTactics-style champion/item presentation, flagship-relative variant diffs, Team Planner export codes, shared-lobby matchup and opponent-conditioned Counter Item analytics, evidence drill-downs, snapshot history/trends, portable `.tftpack` transfer, complete EN/ES UX, bounded rendering/search, secured standalone Electron window, local shutdown control, compressed bundled snapshot import, and NSIS in-place updating.
 - Owner-data baseline: TFTTool 0.6.26 is installed at `C:\Program Files\TFTTool`. The complete owner state remains at SHA-256 `DA5DB1493A8CD7F1B99DA0AA10BB8FE97AB4DC1214B069ECBF05A8F0708DA2FA` with four snapshots, 24,000 current observations, Spanish preference, five favorites, history, and protected Riot-key availability preserved.
@@ -68,7 +68,7 @@ The first owner-facing in-place update must include the complete, freshly valida
 
 ## Next actions
 
-1. Publish the focused 0.6.29 update through the controlled GitHub channel.
+1. Monitor the focused 0.6.29 production-BETA update.
 2. Import Set 18 Live data once high-rank observations become available.
 
 ## Blockers
@@ -84,6 +84,7 @@ The first owner-facing in-place update must include the complete, freshly valida
 
 - TFTTool 0.6.29 passes the complete 131-test regression inventory after correcting its version fixture, plus isolated source and packaged Electron visual QA. PBE exposes only its represented Set 18, Live retains its independently selected Set 17, source switching restores each choice, and the selector renders inactive environment text as `rgb(203, 211, 225)` plus options as `rgb(245, 217, 129)` over `rgb(21, 26, 37)`. All 48,000 observations and prior packaged UI contracts remain intact.
 - The self-contained `dist/TFTTool Setup 0.6.29.exe` is 102,673,427 bytes with SHA-256 `EC5702B0982271EE0EEBEC7C036AA1087D162C4CCA5506E9C1E06BA9AA687186`. Packaged QA used isolated application and Electron profile directories; the already-running owner installation was not closed, relaunched, updated, or modified.
+- Public-channel readiness confirms the uploaded `v0.6.29` asset reports the exact expected size and SHA-256 before `stable.json` announces it. The owner installation remains reserved for owner-controlled updating.
 - TFTTool 0.6.28 passes all 131 automated tests and isolated source plus packaged Electron visual QA. Its seed contains exactly 48,000 unique observations across `set-17-live` (24,000) and `set-18-pbe` (24,000), occupies 17,177,632 bytes, and has SHA-256 `CDB44543D5C3664556DF9C43E1359E89DE84315E5F5B903B0839416FBDAADF8D`. Packaged QA verifies the empty Set 18 Live default, explicit-only PBE selection, future-proof Set 18/17 dropdown, 27 PBE and 25 Live compositions, all visible Set 18 portrait URLs, every cost color, minimum 1024-pixel viewport, complete prior interaction/layout/favorite/export contracts, and no horizontal overflow.
 - The self-contained `dist/TFTTool Setup 0.6.28.exe` is 102,672,765 bytes with SHA-256 `783C87B171406401DF066ABD90A734D29AB61E6866F69D58CC83B7D8FBB71527`. Packaged QA used isolated ports and data directories; the owner installation was never installed, closed, updated, or modified.
 - Public-channel readiness confirms `stable.json` serves version 0.6.28 only after the GitHub release asset was uploaded with the exact expected 102,672,765-byte size and SHA-256 digest. No agent-side update request, installation, application shutdown, or relaunch was performed.
