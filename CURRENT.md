@@ -12,9 +12,9 @@ All development and testing must run in the repository-owned isolated QA sandbox
 
 The first owner-facing in-place update must include the complete, freshly validated six-region real-data snapshot collected during QA so the product is ready for immediate use without another same-day refresh. Never discard that retrieved dataset. Import it only when newer than the owner's latest local snapshot, while preserving every existing historical snapshot, setting, and encrypted Riot key.
 
-- Phase: 0.6.30 passed isolated QA and is ready for controlled publication. The owner's installation remains untouched.
+- Phase: 0.6.30 is published and verified on the controlled public update channel. The owner's installation remains untouched.
 - Branch: `main`.
-- Published release: TFTTool `0.6.29` is available on public `main` with tag `v0.6.29`; `updates/stable.json` references its 102,673,427-byte release asset and SHA-256 `EC5702B0982271EE0EEBEC7C036AA1087D162C4CCA5506E9C1E06BA9AA687186`.
+- Published release: TFTTool `0.6.30` is available on public `main` with tag `v0.6.30`; `updates/stable.json` references its 102,673,201-byte release asset and SHA-256 `7CB211AB490050A8ED3622BC7CAF2CA0C3F94D77BCDC19E17E25680C2A256DCC`.
 - GitHub: public `Gabriel-Vasquez/TFTTool`.
 - Implemented and installed: official multi-region Riot ingestion, protected local key storage and invalid-key replacement, full baseline plus incremental diff refresh, deterministic current-set archetypes, real trait breakpoints, exact prevalence/raw-placement weighting, TFTactics-style champion/item presentation, flagship-relative variant diffs, Team Planner export codes, shared-lobby matchup and opponent-conditioned Counter Item analytics, evidence drill-downs, snapshot history/trends, portable `.tftpack` transfer, complete EN/ES UX, bounded rendering/search, secured standalone Electron window, local shutdown control, compressed bundled snapshot import, and NSIS in-place updating.
 - Owner-data baseline: TFTTool 0.6.26 is installed at `C:\Program Files\TFTTool`. The complete owner state remains at SHA-256 `DA5DB1493A8CD7F1B99DA0AA10BB8FE97AB4DC1214B069ECBF05A8F0708DA2FA` with four snapshots, 24,000 current observations, Spanish preference, five favorites, history, and protected Riot-key availability preserved.
@@ -69,8 +69,7 @@ The first owner-facing in-place update must include the complete, freshly valida
 
 ## Next actions
 
-1. Publish the focused 0.6.30 cost-border correction and verify the public update channel.
-2. Import Set 18 Live data once high-rank observations become available.
+1. Import Set 18 Live data once high-rank observations become available.
 
 ## Blockers
 
@@ -85,6 +84,7 @@ The first owner-facing in-place update must include the complete, freshly valida
 
 - TFTTool 0.6.30 passes all 131 automated tests plus isolated packaged Electron and direct browser visual QA. All rendered costs are constrained to official set-scoped tiers 1-5; QA found 46 gray cost-1, 47 green cost-2, 70 blue cost-3, 90 purple cost-4, and 40 gold cost-5 portraits in the exercised PBE view. Every sampled CORE portrait's 3px border and brilliant glow resolve to the same cost color, with no inherited gold masking. The exact 24,000 Live + 24,000 PBE seed and all existing contracts remain intact.
 - The self-contained `dist/TFTTool Setup 0.6.30.exe` is 102,673,201 bytes with SHA-256 `7CB211AB490050A8ED3622BC7CAF2CA0C3F94D77BCDC19E17E25680C2A256DCC`. Packaged and browser QA used isolated data and Electron profile directories; the owner installation was not closed, relaunched, updated, or modified.
+- Public-channel verification confirms a 0.6.29 client detects 0.6.30 and the real updater path downloads all 102,673,201 bytes from GitHub with SHA-256 `7CB211AB490050A8ED3622BC7CAF2CA0C3F94D77BCDC19E17E25680C2A256DCC`. The temporary download was removed without executing the installer.
 - TFTTool 0.6.29 passes the complete 131-test regression inventory after correcting its version fixture, plus isolated source and packaged Electron visual QA. PBE exposes only its represented Set 18, Live retains its independently selected Set 17, source switching restores each choice, and the selector renders inactive environment text as `rgb(203, 211, 225)` plus options as `rgb(245, 217, 129)` over `rgb(21, 26, 37)`. All 48,000 observations and prior packaged UI contracts remain intact.
 - The self-contained `dist/TFTTool Setup 0.6.29.exe` is 102,673,427 bytes with SHA-256 `EC5702B0982271EE0EEBEC7C036AA1087D162C4CCA5506E9C1E06BA9AA687186`. Packaged QA used isolated application and Electron profile directories; the already-running owner installation was not closed, relaunched, updated, or modified.
 - Public-channel verification confirms a 0.6.28 client detects 0.6.29 and the real updater path downloads all 102,673,427 bytes from GitHub with SHA-256 `EC5702B0982271EE0EEBEC7C036AA1087D162C4CCA5506E9C1E06BA9AA687186`. The owner installation remains reserved for owner-controlled updating.
