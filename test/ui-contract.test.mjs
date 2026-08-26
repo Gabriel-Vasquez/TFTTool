@@ -368,6 +368,9 @@ test('champion cost borders, brilliant CORE treatment, and item components are v
     readFile(join(root, 'src', 'riot', 'metadata.mjs'), 'utf8')
   ]);
   assert.match(app, /function championCost/);
+  assert.match(app, /const setScoped = Number\(metadata\('champions', champion\.id\)\.cost\)/);
+  assert.match(app, /setScoped >= 1 && setScoped <= 5/);
+  assert.doesNotMatch(app.match(/function championCost[\s\S]*?\n\}/)?.[0] || '', /<= 10/);
   assert.match(app, /highlighted-core/);
   assert.match(css, /\.champion-tile\.cost-1/);
   assert.match(css, /\.champion-tile\.cost-2/);
@@ -375,6 +378,8 @@ test('champion cost borders, brilliant CORE treatment, and item components are v
   assert.match(css, /\.champion-tile\.cost-4 \.champion-portrait/);
   assert.match(css, /\.champion-tile\.cost-5 \.champion-portrait/);
   assert.match(css, /\.highlighted-core \.champion-portrait/);
+  assert.match(css, /box-shadow:0 0 0 2px currentColor,0 0 15px currentColor/);
+  assert.doesNotMatch(css, /\.champion-tile\.cost-(?:6|7|8|9|10)/);
   assert.match(css, /border-width:3px;outline:1px solid currentColor/);
   assert.match(app, /function itemComponentsView/);
   assert.match(app, /type === 'items' \? itemComponentsView/);

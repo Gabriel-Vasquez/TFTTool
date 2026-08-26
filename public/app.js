@@ -93,12 +93,12 @@ function visible(items, type = state.tab) { const query = state.search.toLocaleL
 function resultLimitNotice(shown, total) { return total > shown ? `<p class="result-limit">${language() === 'es' ? `Mostrando los primeros ${number.format(shown)} de ${number.format(total)} resultados. Usa la búsqueda para filtrar todo el conjunto.` : `Showing the first ${number.format(shown)} of ${number.format(total)} results. Use search to filter the full dataset.`}</p>` : ''; }
 function icon(type, id, className = 'entity-icon', detail = '') { const meta = metadata(type, id); const tooltip = [meta.name, meta.description, detail].filter(Boolean).join(' · '); return `<span class="icon-wrap">${meta.image ? `<img class="${className}" src="${escapeHtml(meta.image)}" alt="${escapeHtml(meta.name)}" loading="lazy">` : `<span class="${className}"></span>`}<span class="tooltip" role="tooltip">${escapeHtml(tooltip)}</span></span>`; }
 function championCost(champion) {
+  const setScoped = Number(metadata('champions', champion.id).cost);
+  if (Number.isInteger(setScoped) && setScoped >= 1 && setScoped <= 5) return setScoped;
   const direct = Number(champion.cost);
-  if (direct >= 1 && direct <= 10) return direct;
+  if (Number.isInteger(direct) && direct >= 1 && direct <= 5) return direct;
   const rarityCost = new Map([[0, 1], [1, 2], [2, 3], [4, 4], [6, 5]]).get(Number(champion.rarity));
-  if (rarityCost) return rarityCost;
-  const fallback = Number(metadata('champions', champion.id).cost);
-  return fallback >= 1 && fallback <= 10 ? fallback : null;
+  return rarityCost || null;
 }
 function championTile(champion, { core = false, highlighted = false, showName = false, hideItems = false, itemSlots = false, contextId = null } = {}) {
   const itemSource = itemSlots ? champion.itemSlots : champion.items;

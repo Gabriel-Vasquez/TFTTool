@@ -12,7 +12,7 @@ All development and testing must run in the repository-owned isolated QA sandbox
 
 The first owner-facing in-place update must include the complete, freshly validated six-region real-data snapshot collected during QA so the product is ready for immediate use without another same-day refresh. Never discard that retrieved dataset. Import it only when newer than the owner's latest local snapshot, while preserving every existing historical snapshot, setting, and encrypted Riot key.
 
-- Phase: 0.6.29 is published after isolated automated and packaged visual QA as a two-correction incremental over 0.6.28: source-specific Set selection and readable inactive selector text. The owner's installation remains untouched.
+- Phase: 0.6.30 passed isolated QA and is ready for controlled publication. The owner's installation remains untouched.
 - Branch: `main`.
 - Published release: TFTTool `0.6.29` is available on public `main` with tag `v0.6.29`; `updates/stable.json` references its 102,673,427-byte release asset and SHA-256 `EC5702B0982271EE0EEBEC7C036AA1087D162C4CCA5506E9C1E06BA9AA687186`.
 - GitHub: public `Gabriel-Vasquez/TFTTool`.
@@ -24,6 +24,7 @@ The first owner-facing in-place update must include the complete, freshly valida
 - Champion presentation is set-scoped as well: portrait, cost, planner code, and localization are resolved from the selected dataset's own metadata. A champion returning in a later set can therefore use different artwork without overwriting or leaking the earlier set's portrait, including across imports and metadata caches.
 - Set and environment are separate, future-proof controls in 0.6.28. The Set dropdown is derived from every set represented by an imported Live or PBE dataset; the distant Live/PBE segmented selector never silently changes source. A clean install therefore opens the highest known set in Live mode even when that exact dataset is empty, and PBE data appears only after an explicit PBE selection. Importing a future `set-N-live` pack immediately fills that existing Live selection without an application release.
 - Version 0.6.29 gives Live and PBE independent Set selections. PBE lists its own represented sets and returns to its last selected Set, while Live continues to expose the newest known Set even before Live observations exist. Inactive environment text and every native Set option use explicit high-contrast colors.
+- Version 0.6.30 makes set-scoped champion metadata authoritative for the displayed 1–5 cost and rejects invalid visual cost tiers. CORE brilliance now amplifies each champion's own gray, green, blue, purple, or gold cost color instead of painting a misleading gold ring over every CORE portrait.
 - Favorites are dataset-scoped too. Existing pre-selector favorites migrate intact to Set 17 Live, while new Live/PBE favorites with the same archetype identity coexist independently. Portable metadata imports deep-merge by dataset so a partial data update cannot discard another set's portraits or localization.
 - Dataset ordering is reusable across future transitions: the highest set is selected when no explicit preference exists, and a complete Live dataset outranks PBE for the same set. An explicitly saved Live/PBE choice remains authoritative.
 - Version 0.6.28 is collecting an exact 24,000-observation Set 18 PBE baseline from queue 1090 within the current five-day window. The official Match-v1 endpoint has no pre-detail queue filter, so the collector rejects other PBE modes after detail retrieval, honors Riot's shared regional rate limit, and writes minute-throttled resumable QA checkpoints. Future PBE updates start after the newest retained observation and roll only newer boards into the newest 24,000; a partial graph can never enter the release seed.
@@ -68,7 +69,7 @@ The first owner-facing in-place update must include the complete, freshly valida
 
 ## Next actions
 
-1. Monitor the focused 0.6.29 production-BETA update.
+1. Publish the focused 0.6.30 cost-border correction and verify the public update channel.
 2. Import Set 18 Live data once high-rank observations become available.
 
 ## Blockers
@@ -82,6 +83,8 @@ The first owner-facing in-place update must include the complete, freshly valida
 
 ## Validation
 
+- TFTTool 0.6.30 passes all 131 automated tests plus isolated packaged Electron and direct browser visual QA. All rendered costs are constrained to official set-scoped tiers 1-5; QA found 46 gray cost-1, 47 green cost-2, 70 blue cost-3, 90 purple cost-4, and 40 gold cost-5 portraits in the exercised PBE view. Every sampled CORE portrait's 3px border and brilliant glow resolve to the same cost color, with no inherited gold masking. The exact 24,000 Live + 24,000 PBE seed and all existing contracts remain intact.
+- The self-contained `dist/TFTTool Setup 0.6.30.exe` is 102,673,201 bytes with SHA-256 `7CB211AB490050A8ED3622BC7CAF2CA0C3F94D77BCDC19E17E25680C2A256DCC`. Packaged and browser QA used isolated data and Electron profile directories; the owner installation was not closed, relaunched, updated, or modified.
 - TFTTool 0.6.29 passes the complete 131-test regression inventory after correcting its version fixture, plus isolated source and packaged Electron visual QA. PBE exposes only its represented Set 18, Live retains its independently selected Set 17, source switching restores each choice, and the selector renders inactive environment text as `rgb(203, 211, 225)` plus options as `rgb(245, 217, 129)` over `rgb(21, 26, 37)`. All 48,000 observations and prior packaged UI contracts remain intact.
 - The self-contained `dist/TFTTool Setup 0.6.29.exe` is 102,673,427 bytes with SHA-256 `EC5702B0982271EE0EEBEC7C036AA1087D162C4CCA5506E9C1E06BA9AA687186`. Packaged QA used isolated application and Electron profile directories; the already-running owner installation was not closed, relaunched, updated, or modified.
 - Public-channel verification confirms a 0.6.28 client detects 0.6.29 and the real updater path downloads all 102,673,427 bytes from GitHub with SHA-256 `EC5702B0982271EE0EEBEC7C036AA1087D162C4CCA5506E9C1E06BA9AA687186`. The owner installation remains reserved for owner-controlled updating.
