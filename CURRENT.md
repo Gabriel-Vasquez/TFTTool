@@ -67,8 +67,8 @@ The first owner-facing in-place update must include the complete, freshly valida
 
 ## Next actions
 
-1. Repeat the full automated suite and installed visual QA against the completed bilingual 48,000-observation seed and separated Set/environment selectors.
-2. Package 0.6.28 and publish it to the controlled GitHub update channel without touching the owner's installation.
+1. Monitor the 0.6.28 production-BETA release and import Set 18 Live data once high-rank observations become available.
+2. Keep PBE selection explicit; never substitute it automatically when a selected Live dataset is empty.
 
 ## Blockers
 
@@ -83,6 +83,7 @@ The first owner-facing in-place update must include the complete, freshly valida
 
 - TFTTool 0.6.28 passes all 131 automated tests and isolated source plus packaged Electron visual QA. Its seed contains exactly 48,000 unique observations across `set-17-live` (24,000) and `set-18-pbe` (24,000), occupies 17,177,632 bytes, and has SHA-256 `CDB44543D5C3664556DF9C43E1359E89DE84315E5F5B903B0839416FBDAADF8D`. Packaged QA verifies the empty Set 18 Live default, explicit-only PBE selection, future-proof Set 18/17 dropdown, 27 PBE and 25 Live compositions, all visible Set 18 portrait URLs, every cost color, minimum 1024-pixel viewport, complete prior interaction/layout/favorite/export contracts, and no horizontal overflow.
 - The self-contained `dist/TFTTool Setup 0.6.28.exe` is 102,672,765 bytes with SHA-256 `783C87B171406401DF066ABD90A734D29AB61E6866F69D58CC83B7D8FBB71527`. Packaged QA used isolated ports and data directories; the owner installation was never installed, closed, updated, or modified.
+- Public-channel readiness confirms `stable.json` serves version 0.6.28 only after the GitHub release asset was uploaded with the exact expected 102,672,765-byte size and SHA-256 digest. No agent-side update request, installation, application shutdown, or relaunch was performed.
 - Local persistence now migrates legacy embedded snapshots into one compressed `library.json.gz` transaction. Settings and favorite changes write only the small `state.json`, while a completed data update commits its snapshot and set-scoped metadata together; the isolated primary service startup fell from roughly 29.4 seconds before this repair to 9.8 seconds in the final full-suite pass.
 - TFTTool 0.6.27 is functionally identical to 0.6.26 and passes all 37 focused end-to-end, updater, executable PowerShell handoff/BOM, and UI-contract tests. Its 93,888,005-byte installer has SHA-256 `854F8C11FCCDF39DE913DEA0C904E232B2494F274D0644A9C07C90055C536D1C`. The owner installation remains 0.6.26 for independent validation.
 - Public-channel readiness confirms `stable.json` serves version 0.6.27 with the exact expected size and checksum, and the GitHub release asset reports 93,888,005 bytes. No agent-side update request, installation, application shutdown, or relaunch was performed; owner validation remains pending.
