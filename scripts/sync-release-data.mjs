@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { APP_VERSION, REGIONS, TARGET_OBSERVATIONS_PER_REGION, dataDirectory } from '../src/config.mjs';
+import { APP_VERSION, REGIONS, REGION_MAKEUP, REGION_MAKEUP_PROVIDERS, TARGET_OBSERVATIONS_PER_REGION, dataDirectory } from '../src/config.mjs';
 import { analyzeCurrentSet } from '../src/domain/analysis.mjs';
 import { ANALYSIS_VERSION } from '../src/domain/composition.mjs';
 import { PBE_SET_18_DATASET, datasetIdentity } from '../src/domain/dataset.mjs';
@@ -12,7 +12,16 @@ const sourceFile = resolve(process.env.TFTTOOL_RELEASE_DATA_PACK || join(dataDir
 const outputFile = resolve(process.argv[2] || 'seed/latest-snapshot.tftpack');
 const manifestFile = resolve(process.argv[3] || 'seed/latest-snapshot.manifest.json');
 const PBE_TARGET_OBSERVATIONS = 24_000;
+const LIVE_TOTAL_OBSERVATIONS = TARGET_OBSERVATIONS_PER_REGION * Object.keys(REGIONS).length;
 const exists = async (file) => { try { await access(file); return true; } catch { return false; } };
+const liveSnapshotComplete = (snapshot) => {
+  if (snapshot?.collection?.regionMakeup || REGION_MAKEUP) {
+    return snapshot.observations.length === LIVE_TOTAL_OBSERVATIONS
+      && Object.keys(REGIONS).every((region) => snapshot.observations.some((item) => item.region === region))
+      && REGION_MAKEUP_PROVIDERS.every((region) => snapshot.observations.filter((item) => item.region === region).length >= TARGET_OBSERVATIONS_PER_REGION);
+  }
+  return snapshot.observations.length === LIVE_TOTAL_OBSERVATIONS && Object.keys(REGIONS).every((region) => snapshot.observations.filter((item) => item.region === region).length === TARGET_OBSERVATIONS_PER_REGION);
+};
 
 if (!await exists(sourceFile)) {
   const existing = parseDataPack(await readFile(outputFile));
@@ -33,7 +42,7 @@ const latestByDataset = new Map();
 const candidates = [...committed.snapshots, ...source.snapshots].filter((candidate) => candidate?.sufficiency?.publishable === true).sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt));
 for (const snapshot of candidates) {
   const datasetId = datasetIdentity(snapshot);
-  const complete = datasetId.endsWith('-pbe') ? snapshot.observations.length === PBE_TARGET_OBSERVATIONS : snapshot.observations.length === TARGET_OBSERVATIONS_PER_REGION * Object.keys(REGIONS).length && Object.keys(REGIONS).every((region) => snapshot.observations.filter((item) => item.region === region).length === TARGET_OBSERVATIONS_PER_REGION);
+  const complete = datasetId.endsWith('-pbe') ? snapshot.observations.length === PBE_TARGET_OBSERVATIONS : liveSnapshotComplete(snapshot);
   if (complete) latestByDataset.set(datasetId, snapshot);
 }
 let snapshots = [...latestByDataset.values()];
@@ -47,8 +56,15 @@ if (!liveSnapshot) throw new Error('The staged export has no complete Live datas
 
 const expectedRegions = Object.keys(REGIONS);
 const regionalCounts = Object.fromEntries(expectedRegions.map((region) => [region, liveSnapshot.observations.filter((item) => item.region === region).length]));
-for (const [region, count] of Object.entries(regionalCounts)) if (count !== TARGET_OBSERVATIONS_PER_REGION) throw new Error(`${region} has ${count} observations; expected ${TARGET_OBSERVATIONS_PER_REGION}.`);
-if (liveSnapshot.observations.length !== TARGET_OBSERVATIONS_PER_REGION * expectedRegions.length) throw new Error('The staged export is not the complete six-region dataset.');
+if (liveSnapshot.observations.length !== LIVE_TOTAL_OBSERVATIONS) throw new Error('The staged export is not the complete six-region dataset.');
+if (liveSnapshot.collection?.regionMakeup || REGION_MAKEUP) {
+  for (const [region, count] of Object.entries(regionalCounts)) {
+    if (count < 1) throw new Error(`${region} has no observations.`);
+    if (REGION_MAKEUP_PROVIDERS.includes(region) && count < TARGET_OBSERVATIONS_PER_REGION) throw new Error(`${region} has ${count} observations; provider regions need at least ${TARGET_OBSERVATIONS_PER_REGION}.`);
+  }
+} else {
+  for (const [region, count] of Object.entries(regionalCounts)) if (count !== TARGET_OBSERVATIONS_PER_REGION) throw new Error(`${region} has ${count} observations; expected ${TARGET_OBSERVATIONS_PER_REGION}.`);
+}
 if (!releaseMetadata?.es_ES || !releaseMetadata?.en_US) throw new Error('The staged export requires Spanish and English metadata.');
 if (releaseMetadata.es_ES.itemTaxonomyVersion !== ITEM_TAXONOMY_VERSION || releaseMetadata.en_US.itemTaxonomyVersion !== ITEM_TAXONOMY_VERSION) throw new Error('The staged export item taxonomy is outdated; export once from the current TFTTool release.');
 const pbeSnapshot = latestByDataset.get(PBE_SET_18_DATASET);

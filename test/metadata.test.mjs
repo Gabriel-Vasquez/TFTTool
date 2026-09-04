@@ -43,6 +43,37 @@ test('metadata falls back to its local cache when Data Dragon is unavailable', a
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
+test('metadata merges the current set from CommunityDragon when Data Dragon lacks it', async () => {
+  const fetchImpl = async (url) => {
+    if (url.endsWith('versions.json')) return { ok: true, json: async () => ['16.17.1'] };
+    if (url.endsWith('tftchampions-teamplanner.json')) return { ok: true, json: async () => ({ TFTSet18: [{ character_id: 'DA_18_Maokai', team_planner_code: 61 }] }) };
+    if (url.includes('/cdragon/tft/')) return {
+      ok: true,
+      json: async () => ({
+        sets: {
+          18: {
+            champions: [{ apiName: 'DA_18_Maokai', name: 'Maokai', cost: 5, tileIcon: 'assets/characters/maokai/hud/maokai.tex' }],
+            traits: [{ apiName: 'DA_18_Elderwood', name: 'Elderwood', icon: 'assets/ux/traiticons/trait_icon_18_elderwood.tex', effects: [{ minUnits: 3 }, { minUnits: 5 }] }]
+          }
+        },
+        items: [{ apiName: 'DA_18_Relic', name: 'Relic', icon: 'assets/ux/tft/itemicons/relic.tex', composition: [] }]
+      })
+    };
+    if (url.endsWith('tft-champion.json')) return { ok: true, json: async () => ({ data: { one: { id: 'TFT17_Old', name: 'Old', tier: 1 } } }) };
+    if (url.endsWith('tft-item.json')) return { ok: true, json: async () => ({ data: { one: { id: 'DA_18_Relic', name: 'Relic' } } }) };
+    return { ok: true, json: async () => ({ data: {} }) };
+  };
+  const metadata = await new MetadataClient(fetchImpl).load('16.17', 'en_US');
+  assert.equal(metadata.champions.TFT17_Old.cost, 1);
+  assert.equal(metadata.champions.DA_18_Maokai.cost, 5);
+  assert.equal(metadata.champions.DA_18_Maokai.teamPlannerCode, 61);
+  assert.equal(metadata.champions.DA_18_Maokai.teamPlannerSet, 'TFTSet18');
+  assert.match(metadata.champions.DA_18_Maokai.image, /raw\.communitydragon\.org\/16\.17\/game\/assets\/characters\/maokai\/hud\/maokai\.png$/);
+  assert.deepEqual(metadata.traits.DA_18_Elderwood.breakpoints, [3, 5]);
+  assert.match(metadata.traits.DA_18_Elderwood.image, /trait_icon_18_elderwood\.png$/);
+  assert.match(metadata.items.DA_18_Relic.image, /relic\.png$/);
+});
+
 test('metadata uses es-ES static trait thresholds and the corrected Astromante term', async () => {
   const urls = [];
   const fetchImpl = async (url) => {

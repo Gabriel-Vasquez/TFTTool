@@ -270,7 +270,7 @@ export class RiotClient {
       return observations;
     }
 
-    while (playersScanned < scanLimit && (incremental || observations.length < target)) {
+    while (playersScanned < scanLimit && (observations.length < target || (incremental && resume.stopAtTarget !== true))) {
       const scanEnd = Math.min(scanLimit, playersScanned + DISCOVERY_BATCH_SIZE);
       const scanPlayers = players.slice(playersScanned, scanEnd);
       playersScanned = scanEnd;

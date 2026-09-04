@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
-import { APP_VERSION, PREFERRED_PORT, QA_ALLOW_SMALL_SNAPSHOTS, REFRESH_TARGET_PER_REGION, REGIONS, dataDirectory } from './config.mjs';
+import { APP_VERSION, PREFERRED_PORT, QA_ALLOW_SMALL_SNAPSHOTS, REFRESH_TARGET_PER_REGION, REGION_MAKEUP, REGION_MAKEUP_PROVIDERS, REGIONS, dataDirectory } from './config.mjs';
 import { aggregate } from './domain/aggregate.mjs';
 import { analyzeCurrentSet, selectCurrentSetObservations } from './domain/analysis.mjs';
 import { assessSufficiency } from './domain/stability.mjs';
@@ -52,8 +52,24 @@ async function metadataFor(patch, locale, datasetId = LIVE_DATASET) {
 async function portableMetadataPayloadForSnapshot(snapshot) {
   const descriptor = datasetDescriptor(snapshot);
   const patch = snapshot?.observations?.[0]?.gameVersion || snapshot?.observations?.[0]?.patch;
-  const entries = await Promise.all(['es_ES', 'en_US'].map(async (locale) => [locale, await metadataFor(patch, locale, descriptor.id)]));
+  // A set-scoped live dataset must never inherit another set's top-level seed
+  // metadata; load the patch metadata directly when no dataset entry exists yet.
+  const loadFor = async (locale) => {
+    const cached = portableMetadata(locale, patch, descriptor.id);
+    if (cached) return cached;
+    if (descriptor.id.endsWith('-pbe')) return pbeMetadata.load(Number(descriptor.id.match(/^set-(\d+)-pbe$/)?.[1]), locale);
+    const cachedTopLevel = portableMetadata(locale, patch, LIVE_DATASET);
+    return descriptor.id === LIVE_DATASET && cachedTopLevel ? cachedTopLevel : metadata.load(patch, locale);
+  };
+  const entries = await Promise.all(['es_ES', 'en_US'].map(async (locale) => [locale, await loadFor(locale)]));
   const values = Object.fromEntries(entries);
+  // Never persist another set's metadata under a set-scoped dataset id.
+  const setNumber = descriptor.setNumber;
+  if (Number.isFinite(setNumber) && descriptor.id !== LIVE_DATASET) {
+    for (const [locale, localized] of Object.entries(values)) {
+      if (localized && !Object.keys(localized.champions || {}).some((id) => id.includes(`_${setNumber}_`) || id.includes(`${setNumber}_`) || id.endsWith(String(setNumber)))) throw new Error('METADATA_SET_MISMATCH');
+    }
+  }
   const datasets = { ...(store.state.portableMetadata.datasets || {}), [descriptor.id]: values };
   return descriptor.id === LIVE_DATASET ? { ...values, datasets } : { datasets };
 }
@@ -64,6 +80,48 @@ async function analysisOptions(observations) {
     const localized = await metadataFor(observations[0]?.gameVersion || observations[0]?.patch, 'es_ES', datasetId);
     return { traitBreakpoints: metadataBreakpoints(localized), itemMetadata: localized.items || {} };
   } catch { return {}; }
+}
+
+const LIVE_TOTAL_TARGET = REFRESH_TARGET_PER_REGION * Object.keys(REGIONS).length;
+
+function makeupTrim(observations, totalTarget) {
+  if (!REGION_MAKEUP || observations.length <= totalTarget) return observations;
+  const providers = new Set(REGION_MAKEUP_PROVIDERS);
+  const excess = observations.length - totalTarget;
+  const trimmable = observations.filter((observation) => providers.has(observation.region)).sort((left, right) => Date.parse(left.recordedAt) - Date.parse(right.recordedAt));
+  const dropped = new Set(trimmable.slice(0, Math.min(excess, trimmable.length)).map((observation) => observation.id));
+  return observations.filter((observation) => !dropped.has(observation.id));
+}
+
+async function collectRegionMakeup(client, collectedObservations) {
+  const providers = REGION_MAKEUP_PROVIDERS.filter((region) => Object.keys(REGIONS).includes(region));
+  if (!providers.length) return collectedObservations;
+  let merged = collectedObservations;
+  for (let pass = 0; pass < 4; pass += 1) {
+    const deficit = LIVE_TOTAL_TARGET - selectCurrentSetObservations(merged).length;
+    if (deficit <= 0) break;
+    const providerTarget = REFRESH_TARGET_PER_REGION + Math.ceil(deficit / providers.length);
+    const before = selectCurrentSetObservations(merged).length;
+    // A fresh deep scan per provider (100 matches/player over the full sample
+    // window) stops at the raised target; the earlier provider observations are
+    // re-collected and merged by identity during analysis.
+    const extra = await client.sampleAll({
+      regions: providers,
+      target: providerTarget,
+      resume: Object.fromEntries(providers.map((region) => [region, {
+        observations: [],
+        currentPatch: null,
+        completed: false,
+        incremental: true,
+        stopAtTarget: true,
+        playersScanned: 0,
+        scanLimit: Number.MAX_SAFE_INTEGER
+      }]))
+    });
+    merged = [...merged.filter((observation) => !providers.includes(observation.region)), ...extra];
+    if (selectCurrentSetObservations(merged).length <= before) break;
+  }
+  return makeupTrim(selectCurrentSetObservations(merged), LIVE_TOTAL_TARGET);
 }
 
 async function refreshLive(controller, requestedDatasetId = LIVE_DATASET) {
@@ -126,7 +184,7 @@ async function refreshLive(controller, requestedDatasetId = LIVE_DATASET) {
       };
     };
     let lastCheckpointAt = 0;
-    const collectedObservations = await client.sampleAll({
+    let collectedObservations = await client.sampleAll({
       target: REFRESH_TARGET_PER_REGION,
       resume: checkpoint.regions,
       onCheckpoint: async (region, state) => {
@@ -136,10 +194,17 @@ async function refreshLive(controller, requestedDatasetId = LIVE_DATASET) {
         await store.saveRefreshCheckpoint(checkpointForStorage());
       }
     });
+    if (REGION_MAKEUP && requestedDatasetId.endsWith('-live')) collectedObservations = await collectRegionMakeup(client, collectedObservations);
     const observations = selectCurrentSetObservations(collectedObservations);
     job.stage = 'processing';
     const result = analyzeCurrentSet(observations, 0.5, await analysisOptions(observations)).result;
     const sufficiency = assessSufficiency(observations, result, Object.keys(REGIONS));
+    if (REGION_MAKEUP) {
+      const coveredAll = Object.keys(REGIONS).every((region) => observations.some((observation) => observation.region === region));
+      sufficiency.publishable = coveredAll && observations.length === LIVE_TOTAL_TARGET;
+      sufficiency.regionMakeup = true;
+      sufficiency.reasons = [...sufficiency.reasons.filter((reason) => reason !== 'regional_sample_imbalanced'), 'region_makeup_active'];
+    }
     const tierSummary = (entries) => Object.fromEntries(['CHALLENGER', 'GRANDMASTER', 'MASTER'].map((tier) => {
       const tierEntries = entries.filter((entry) => entry.sourceTier === tier);
       const points = tierEntries.map((entry) => entry.sourceLeaguePoints).filter(Number.isFinite);
@@ -152,15 +217,18 @@ async function refreshLive(controller, requestedDatasetId = LIVE_DATASET) {
       tierBoundary: tierSummary(observations),
       regions: Object.fromEntries(Object.entries(job.regions).map(([region, progress]) => [region, {
         playersScanned: progress.playersScanned || 0,
-        observations: progress.observations || 0,
+        observations: observations.filter((entry) => entry.region === region).length,
         tierBoundary: tierSummary(observations.filter((entry) => entry.region === region))
-      }]))
+      }])),
+      ...(REGION_MAKEUP ? { regionMakeup: true, regionalCounts: Object.fromEntries(Object.keys(REGIONS).map((region) => [region, observations.filter((entry) => entry.region === region).length])) } : {})
     };
     const setNumber = Number(observations[0]?.setNumber) || Number(String(observations[0]?.set || '').match(/(?:Set)?(\d+)/i)?.[1]);
     const liveDatasetId = Number.isFinite(setNumber) ? `set-${setNumber}-live` : requestedDatasetId;
     const snapshot = { id: crypto.randomUUID(), createdAt: new Date().toISOString(), dataset: { id: liveDatasetId, source: 'live', setNumber: Number.isFinite(setNumber) ? setNumber : null, label: Number.isFinite(setNumber) ? `Set ${setNumber} — Live` : 'Live' }, observations, result, sufficiency, collection };
     job.stage = 'saving';
-    const completeCoverage = hasCompleteRegionalCoverage(snapshot, Object.keys(REGIONS), REFRESH_TARGET_PER_REGION);
+    const completeCoverage = REGION_MAKEUP
+      ? observations.length === LIVE_TOTAL_TARGET && Object.keys(REGIONS).every((region) => observations.some((observation) => observation.region === region))
+      : hasCompleteRegionalCoverage(snapshot, Object.keys(REGIONS), REFRESH_TARGET_PER_REGION);
     if ((sufficiency.publishable && completeCoverage) || QA_ALLOW_SMALL_SNAPSHOTS) {
       const portable = await portableMetadataPayloadForSnapshot(snapshot).catch(() => null);
       await store.addSnapshot(snapshot, portable);
@@ -282,13 +350,23 @@ function resultFor(snapshot, region = 'GLOBAL') {
   return analysisCache.get(key);
 }
 
+// Riot reports "TFT Unreal Version ?.?.?.?" during set-launch windows, leaving
+// the stored patch "unknown"; fall back to the resolved metadata version so
+// the UI can still show which patch the dataset belongs to.
+function displayPatch(snapshot, observations) {
+  const raw = observations[0]?.patch;
+  if (raw && /\d+\.\d+/.test(raw)) return raw;
+  const entry = portableMetadata('es_ES', observations[0]?.gameVersion || raw, datasetDescriptor(snapshot).id);
+  return entry?.version || raw || null;
+}
+
 function analysisFor(url) {
   const snapshot = requestedSnapshot(url);
   if (!snapshot) return null;
   const region = url.searchParams.get('region') || 'GLOBAL';
   const observations = region === 'GLOBAL' ? snapshot.observations : snapshot.observations.filter((item) => item.region === region);
   const result = resultFor(snapshot, region);
-  return { id: snapshot.id, createdAt: snapshot.createdAt, dataset: datasetDescriptor(snapshot), patch: observations[0]?.patch || null, set: observations[0]?.set || null, sufficiency: snapshot.sufficiency, result: responseResult(result), regions: [...new Set(observations.map((item) => item.region))] };
+  return { id: snapshot.id, createdAt: snapshot.createdAt, dataset: datasetDescriptor(snapshot), patch: displayPatch(snapshot, observations), set: observations[0]?.set || null, sufficiency: snapshot.sufficiency, result: responseResult(result), regions: [...new Set(observations.map((item) => item.region))] };
 }
 
 function evidenceFor(url) {
@@ -350,7 +428,7 @@ export async function createTftServer({ onShutdown = () => {}, onInstallUpdate =
     if (request.method === 'GET' && url.pathname === '/api/analysis') return json(response, 200, analysisFor(url));
     if (request.method === 'GET' && url.pathname === '/api/metadata') { const locale = url.searchParams.get('locale') === 'en_US' ? 'en_US' : 'es_ES'; return json(response, 200, await metadataFor(url.searchParams.get('patch'), locale, url.searchParams.get('dataset') || store.defaultDatasetId() || LIVE_DATASET)); }
     if (request.method === 'GET' && url.pathname === '/api/evidence') return json(response, 200, evidenceFor(url));
-    if (request.method === 'GET' && url.pathname === '/api/snapshots') { const datasetId = url.searchParams.get('dataset'); const snapshots = datasetId ? store.currentSnapshots(datasetId) : store.state.snapshots; return json(response, 200, snapshots.map((snapshot) => ({ id: snapshot.id, createdAt: snapshot.createdAt, dataset: datasetDescriptor(snapshot), observationCount: snapshot.observations.length, patch: snapshot.observations[0]?.patch || null, set: snapshot.observations[0]?.set || null, sufficiency: snapshot.sufficiency }))); }
+    if (request.method === 'GET' && url.pathname === '/api/snapshots') { const datasetId = url.searchParams.get('dataset'); const snapshots = datasetId ? store.currentSnapshots(datasetId) : store.state.snapshots; return json(response, 200, snapshots.map((snapshot) => ({ id: snapshot.id, createdAt: snapshot.createdAt, dataset: datasetDescriptor(snapshot), observationCount: snapshot.observations.length, patch: displayPatch(snapshot, snapshot.observations), set: snapshot.observations[0]?.set || null, sufficiency: snapshot.sufficiency }))); }
     if (request.method === 'GET' && url.pathname === '/api/history') { const snapshots = store.currentSnapshots(url.searchParams.get('dataset') || store.defaultDatasetId()); return json(response, 200, compareSnapshots(snapshots.at(-2), snapshots.at(-1))); }
     if (request.method === 'GET' && url.pathname === '/api/data-pack/export') {
       if (!store.state.snapshots.length) return json(response, 404, { error: 'DATA_PACK_EMPTY' });

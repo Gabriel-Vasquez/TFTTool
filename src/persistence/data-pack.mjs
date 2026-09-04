@@ -4,8 +4,10 @@ import { gzipSync, gunzipSync } from 'node:zlib';
 export const DATA_PACK_FORMAT = 'tfttool-data-pack';
 export const DATA_PACK_VERSION = 1;
 export const DATA_SCHEMA_VERSION = 10;
-const MAX_PACK_BYTES = 128 * 1024 * 1024;
-const MAX_UNPACKED_BYTES = 256 * 1024 * 1024;
+// Multi-set bundles (Live + PBE snapshots plus embedded metadata) unpack well past
+// 256 MB, so the unpack ceiling carries generous headroom.
+const MAX_PACK_BYTES = 256 * 1024 * 1024;
+const MAX_UNPACKED_BYTES = 1024 * 1024 * 1024;
 
 const digest = (value) => createHash('sha256').update(value).digest('hex');
 const serializedPayload = (payload) => JSON.stringify(payload);

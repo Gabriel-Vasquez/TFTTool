@@ -1,6 +1,7 @@
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ITEM_TAXONOMY_VERSION, classifyItemCatalog } from '../domain/item-taxonomy.mjs';
+import { buildSetMetadataFromCatalog, ROSTER_DATA_URL } from './pbe-metadata.mjs';
 
 const base = 'https://ddragon.leagueoflegends.com';
 const communityBase = 'https://raw.communitydragon.org';
@@ -122,6 +123,36 @@ export class MetadataClient {
           ...(planner && Number.isInteger(planner.teamPlannerCode) && planner.teamPlannerCode > 0 ? planner : {})
         }];
       }));
+    }
+    // Data Dragon lags new set launches and never lists creature champions or
+    // AD/AP shop variants' base forms; fill every gap from the catalog roster
+    // so live observations keep portraits, costs, planner codes, and imagery.
+    const catalogSetNumbers = [...Object.keys(cdragon?.sets || {}).map(Number), ...(cdragon?.setData || []).map((entry) => Number(entry.number))].filter(Number.isFinite);
+    const currentSet = catalogSetNumbers.length ? Math.max(...catalogSetNumbers) : null;
+    const roster = currentSet === 18 ? await this.json(ROSTER_DATA_URL).catch(() => null) : null;
+    const built = currentSet ? buildSetMetadataFromCatalog(cdragon, { setNumber: currentSet, locale, assetBase: `${communityBase}/${patchLine(version)}`, teamPlanner, roster }) : null;
+    if (built) {
+      for (const [id, entry] of Object.entries(built.champions)) {
+        if (!result.champions[id]) { result.champions[id] = entry; continue; }
+        if (!Number.isInteger(result.champions[id].teamPlannerCode) && Number.isInteger(entry.teamPlannerCode)) {
+          result.champions[id] = { ...result.champions[id], teamPlannerCode: entry.teamPlannerCode, teamPlannerSet: entry.teamPlannerSet };
+        }
+      }
+      for (const [id, entry] of Object.entries(built.traits)) if (!result.traits[id]) result.traits[id] = entry;
+      for (const [id, entry] of Object.entries(built.items)) {
+        if (!result.items[id]) { result.items[id] = entry; continue; }
+        if (!result.items[id].image && entry.image) result.items[id] = { ...result.items[id], image: entry.image };
+      }
+      // Live matches also reference the base form of AD/AP shop variants.
+      const inlineVariant = new RegExp(`^DA_(?:${currentSet}_)?([A-Za-z0-9]+?)${currentSet}_(?:AD|AP)$`);
+      const suffixedVariant = new RegExp(`^DA_${currentSet}_([A-Za-z0-9]+)_(?:AD|AP)$`);
+      for (const [id, entry] of Object.entries(result.champions)) {
+        const base = inlineVariant.exec(id)?.[1] || suffixedVariant.exec(id)?.[1];
+        if (!base) continue;
+        for (const alias of [`TFT${currentSet}_${base}`, `DA_${currentSet}_${base}`, `DA_${base}${currentSet}`]) {
+          if (!result.champions[alias]) result.champions[alias] = { ...entry, id: alias };
+        }
+      }
     }
     this.cache.set(key, result);
     await this.writeCached(result, locale);

@@ -2,11 +2,14 @@ import { ITEM_TAXONOMY_VERSION, buildItemTaxonomy } from '../domain/item-taxonom
 
 const communityBase = 'https://raw.communitydragon.org';
 const rosterDataUrl = 'https://raw.githubusercontent.com/nkhoit/tftkit/main/web/traits/data.json';
+export const ROSTER_DATA_URL = rosterDataUrl;
 
 const plainDescription = (value) => String(value || '').replace(/<br\s*\/?\s*>/gi, ' ').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
-const assetUrl = (path) => path ? `${communityBase}/pbe/game/${String(path).toLowerCase().replace(/\.tex$/i, '.png')}` : null;
+// Roster sources emit raw api keys ("AncientSentinel") as names for jungle
+// creatures; split camelCase so the UI shows readable display names.
+const displayName = (value) => String(value || '').replace(/([a-z])([A-Z])/g, '$1 $2').trim();
 
-function championAliases(champion, setNumber = 18) {
+export function championAliases(champion, setNumber = 18) {
   const key = champion.key || champion.name;
   const aliases = new Set([
     champion.apiName, `TFT${setNumber}_${key}`, `DA_${setNumber}_${key}`, `DA_${key}${setNumber}`, `DA_${setNumber}_${key}_AD`, `DA_${setNumber}_${key}_AP`, `DA_${key}${setNumber}_AD`, `DA_${key}${setNumber}_AP`
@@ -20,6 +23,40 @@ function championAliases(champion, setNumber = 18) {
   if (luxForms[key]) aliases.add(`DA_18_Lux_${luxForms[key]}`);
   if (key === 'LuxBlossom') aliases.add('DA_Lux18_Base');
   return aliases;
+}
+
+export function buildSetMetadataFromCatalog(catalog, { setNumber, locale, assetBase, teamPlanner = null, roster = null } = {}) {
+  const set = catalog?.sets?.[String(setNumber)] || (catalog?.setData || []).find((entry) => Number(entry.number) === setNumber);
+  if (!set) return null;
+  const assetUrl = (path) => path ? `${assetBase}/game/${String(path).toLowerCase().replace(/\.tex$/i, '.png')}` : null;
+
+  const champions = {};
+  const rosterChampions = roster?.champions || (set.champions || []).filter((champion) => champion.apiName).map((champion) => ({ ...champion, key: champion.apiName, icon: assetUrl(champion.tileIcon || champion.icon) }));
+  for (const champion of rosterChampions) {
+    const aliases = championAliases(champion, setNumber);
+    const planned = teamPlanner ? [...aliases].map((alias) => teamPlanner.get(alias)).find(Boolean) || null : null;
+    const value = {
+      id: champion.key,
+      name: champion.name && champion.name !== champion.key ? champion.name : displayName(champion.key),
+      description: plainDescription(champion.ability?.descResolved || champion.ability?.desc),
+      image: champion.icon || null,
+      cost: Number(champion.cost) || null,
+      teamPlannerCode: Number(champion.teamPlannerCode) || (planned && Number.isInteger(planned.teamPlannerCode) && planned.teamPlannerCode > 0 ? planned.teamPlannerCode : null),
+      teamPlannerSet: roster?.teamPlannerSet || planned?.teamPlannerSet || `TFTSet${setNumber}`
+    };
+    for (const alias of aliases) if (alias) champions[alias] = { ...value, id: alias };
+  }
+  const traits = Object.fromEntries((set.traits || []).filter((trait) => trait.apiName).map((trait) => [trait.apiName, {
+    id: trait.apiName, name: trait.name || trait.apiName, description: plainDescription(trait.desc), image: assetUrl(trait.icon),
+    breakpoints: [...new Set((trait.effects || []).map((effect) => Number(effect.minUnits)).filter((value) => value > 0))].sort((left, right) => left - right)
+  }]));
+  const definitions = (catalog.items || []).filter((item) => item.apiName && item.name && String(item.apiName).startsWith('DA_'));
+  const taxonomy = buildItemTaxonomy(definitions);
+  const items = Object.fromEntries(definitions.map((item) => [item.apiName, {
+    id: item.apiName, name: item.name, description: plainDescription(item.desc), image: assetUrl(item.icon),
+    ...(taxonomy.get(item.apiName) || {}), components: [...(item.composition || [])]
+  }]));
+  return { champions, traits, items };
 }
 
 export function pbeMetadataCoverage(observations, metadata) {
@@ -57,26 +94,9 @@ export class PbeMetadataClient {
       this.json(`${communityBase}/pbe/cdragon/tft/${locale.toLowerCase()}.json`).catch(() => this.json(`${communityBase}/pbe/cdragon/tft/en_us.json`)),
       setNumber === 18 ? this.json(rosterDataUrl) : null
     ]);
-    const set = catalog.sets?.[String(setNumber)] || (catalog.setData || []).find((entry) => Number(entry.number) === setNumber);
-    if (!set) throw new Error('PBE_SET_METADATA_UNAVAILABLE');
-
-    const champions = {};
-    const rosterChampions = roster?.champions || (set.champions || []).filter((champion) => champion.apiName).map((champion) => ({ ...champion, key: champion.apiName, icon: assetUrl(champion.tileIcon || champion.icon) }));
-    for (const champion of rosterChampions) {
-      const value = { id: champion.key, name: champion.name || champion.key, description: plainDescription(champion.ability?.descResolved || champion.ability?.desc), image: champion.icon || null, cost: Number(champion.cost) || null, teamPlannerCode: Number(champion.teamPlannerCode) || null, teamPlannerSet: roster?.teamPlannerSet || `TFTSet${setNumber}` };
-      for (const alias of championAliases(champion, setNumber)) if (alias) champions[alias] = { ...value, id: alias };
-    }
-    const traits = Object.fromEntries((set.traits || []).filter((trait) => trait.apiName).map((trait) => [trait.apiName, {
-      id: trait.apiName, name: trait.name || trait.apiName, description: plainDescription(trait.desc), image: assetUrl(trait.icon),
-      breakpoints: [...new Set((trait.effects || []).map((effect) => Number(effect.minUnits)).filter((value) => value > 0))].sort((left, right) => left - right)
-    }]));
-    const definitions = (catalog.items || []).filter((item) => item.apiName && item.name && String(item.apiName).startsWith('DA_'));
-    const taxonomy = buildItemTaxonomy(definitions);
-    const items = Object.fromEntries(definitions.map((item) => [item.apiName, {
-      id: item.apiName, name: item.name, description: plainDescription(item.desc), image: assetUrl(item.icon),
-      ...(taxonomy.get(item.apiName) || {}), components: [...(item.composition || [])]
-    }]));
-    const result = { version: `pbe-set-${setNumber}`, locale, source: 'pbe', setNumber, itemTaxonomyVersion: ITEM_TAXONOMY_VERSION, champions, traits, items };
+    const built = buildSetMetadataFromCatalog(catalog, { setNumber, locale, assetBase: `${communityBase}/pbe`, roster });
+    if (!built) throw new Error('PBE_SET_METADATA_UNAVAILABLE');
+    const result = { version: `pbe-set-${setNumber}`, locale, source: 'pbe', setNumber, itemTaxonomyVersion: ITEM_TAXONOMY_VERSION, ...built };
     this.cache.set(key, result);
     return result;
   }
