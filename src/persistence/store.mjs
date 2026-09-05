@@ -2,16 +2,73 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
-import { gzip, gunzip } from 'node:zlib';
+import { gunzip } from 'node:zlib';
 import { REGIONS, TARGET_OBSERVATIONS_PER_REGION } from '../config.mjs';
 import { LIVE_DATASET, availableDatasets, datasetIdentity, latestSnapshotForDataset, snapshotsForDataset } from '../domain/dataset.mjs';
+import { decodeChunkedJson, encodeChunkedJson, isChunkedJson } from './chunked-json.mjs';
 
 const pause = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const checkpointDigest = (checkpoint) => createHash('sha256').update(JSON.stringify(checkpoint)).digest('hex');
-const gzipAsync = promisify(gzip);
 const gunzipAsync = promisify(gunzip);
 const LIBRARY_FORMAT = 'tfttool-local-library';
-const LIBRARY_VERSION = 1;
+const LIBRARY_VERSION = 2;
+const LEGACY_SNAPSHOTS_KEY = Buffer.from('"snapshots":', 'ascii');
+const LEGACY_METADATA_KEY = Buffer.from('"portableMetadata":', 'ascii');
+
+function skipWhitespace(buffer, start) {
+  let cursor = start;
+  while (cursor < buffer.length && [0x20, 0x09, 0x0a, 0x0d].includes(buffer[cursor])) cursor += 1;
+  return cursor;
+}
+
+function jsonValueEnd(buffer, start) {
+  const opener = buffer[start];
+  const closer = opener === 0x7b ? 0x7d : opener === 0x5b ? 0x5d : null;
+  if (!closer) throw new Error('LOCAL_LIBRARY_INVALID');
+  let depth = 0;
+  let inString = false;
+  for (let cursor = start; cursor < buffer.length; cursor += 1) {
+    const byte = buffer[cursor];
+    if (inString) {
+      if (byte === 0x5c) cursor += 1;
+      else if (byte === 0x22) inString = false;
+      continue;
+    }
+    if (byte === 0x22) { inString = true; continue; }
+    if (byte === opener) depth += 1;
+    else if (byte === closer && --depth === 0) return cursor + 1;
+  }
+  throw new Error('LOCAL_LIBRARY_INVALID');
+}
+
+function parseLegacyLibrary(buffer) {
+  const prefix = buffer.subarray(0, Math.min(buffer.length, 512)).toString('utf8');
+  if (!prefix.includes(`"format":"${LIBRARY_FORMAT}"`) || !prefix.includes('"version":1')) throw new Error('LOCAL_LIBRARY_INVALID');
+  const snapshotsKey = buffer.indexOf(LEGACY_SNAPSHOTS_KEY);
+  if (snapshotsKey < 0) throw new Error('LOCAL_LIBRARY_INVALID');
+  let cursor = skipWhitespace(buffer, snapshotsKey + LEGACY_SNAPSHOTS_KEY.length);
+  if (buffer[cursor] !== 0x5b) throw new Error('LOCAL_LIBRARY_INVALID');
+  cursor += 1;
+  const snapshots = [];
+  while (true) {
+    cursor = skipWhitespace(buffer, cursor);
+    if (buffer[cursor] === 0x5d) { cursor += 1; break; }
+    const end = jsonValueEnd(buffer, cursor);
+    snapshots.push(JSON.parse(buffer.subarray(cursor, end).toString('utf8')));
+    cursor = skipWhitespace(buffer, end);
+    if (buffer[cursor] === 0x2c) { cursor += 1; continue; }
+    if (buffer[cursor] === 0x5d) { cursor += 1; break; }
+    throw new Error('LOCAL_LIBRARY_INVALID');
+  }
+  const metadataKey = buffer.indexOf(LEGACY_METADATA_KEY, cursor);
+  if (metadataKey < 0) throw new Error('LOCAL_LIBRARY_INVALID');
+  const metadataStart = skipWhitespace(buffer, metadataKey + LEGACY_METADATA_KEY.length);
+  const metadataEnd = jsonValueEnd(buffer, metadataStart);
+  const portableMetadata = JSON.parse(buffer.subarray(metadataStart, metadataEnd).toString('utf8'));
+  const documentEnd = skipWhitespace(buffer, metadataEnd);
+  if (buffer[documentEnd] !== 0x7d || skipWhitespace(buffer, documentEnd + 1) !== buffer.length) throw new Error('LOCAL_LIBRARY_INVALID');
+  return { snapshots, portableMetadata };
+}
 
 function mergePortableMetadata(current = {}, incoming = {}) {
   const datasets = { ...(current.datasets || {}) };
@@ -60,16 +117,30 @@ export class LocalStore {
     this.renameFile = renameImpl;
     this.pause = pauseImpl;
     this.libraryLoaded = false;
+    this.libraryNeedsMigration = false;
   }
 
   async load() {
     await mkdir(this.directory, { recursive: true });
     try { const saved = JSON.parse(await readFile(this.file, 'utf8')); const favorites = [...new Map((saved.favorites || []).flatMap((favorite) => { try { const normalized = normalizeFavorite(favorite); return [[favoriteKey(normalized), normalized]]; } catch { return []; } })).values()].sort((left, right) => favoriteKey(left).localeCompare(favoriteKey(right))); this.state = { ...this.state, ...saved, settings: { ...this.state.settings, ...(saved.settings || {}) }, favorites, bundledSnapshotHashes: { ...this.state.bundledSnapshotHashes, ...(saved.bundledSnapshotHashes || {}) } }; } catch (error) { if (error.code !== 'ENOENT') throw error; }
     try {
-      const document = JSON.parse((await gunzipAsync(await readFile(this.libraryFile))).toString('utf8'));
-      if (document?.format !== LIBRARY_FORMAT || document.version !== LIBRARY_VERSION || !Array.isArray(document.snapshots) || !document.portableMetadata || typeof document.portableMetadata !== 'object') throw new Error('LOCAL_LIBRARY_INVALID');
-      this.state.snapshots = document.snapshots;
-      this.state.portableMetadata = document.portableMetadata;
+      const buffer = await readFile(this.libraryFile);
+      let snapshots;
+      let portableMetadata;
+      if (isChunkedJson(buffer)) {
+        let decoded;
+        try { decoded = await decodeChunkedJson(buffer, { expectedFormat: LIBRARY_FORMAT, supportedVersions: [LIBRARY_VERSION] }); }
+        catch { throw new Error('LOCAL_LIBRARY_INVALID'); }
+        const metadataEntry = decoded.entries.find((entry) => entry.name === 'metadata');
+        snapshots = decoded.entries.filter((entry) => /^snapshot:\d+$/.test(entry.name)).map((entry) => entry.value);
+        portableMetadata = metadataEntry?.value;
+      } else {
+        ({ snapshots, portableMetadata } = parseLegacyLibrary(await gunzipAsync(buffer)));
+        this.libraryNeedsMigration = true;
+      }
+      if (!Array.isArray(snapshots) || !portableMetadata || typeof portableMetadata !== 'object') throw new Error('LOCAL_LIBRARY_INVALID');
+      this.state.snapshots = snapshots;
+      this.state.portableMetadata = portableMetadata;
       this.libraryLoaded = true;
     } catch (error) { if (error.code !== 'ENOENT') throw error; }
     try {
@@ -120,9 +191,17 @@ export class LocalStore {
   }
 
   async writeLibrary() {
-    const payload = JSON.stringify({ format: LIBRARY_FORMAT, version: LIBRARY_VERSION, snapshots: this.state.snapshots, portableMetadata: this.state.portableMetadata });
-    await this.writeAtomicBuffer(this.libraryFile, await gzipAsync(Buffer.from(payload), { level: 6 }));
+    const payload = await encodeChunkedJson({
+      format: LIBRARY_FORMAT,
+      version: LIBRARY_VERSION,
+      entries: [
+        { name: 'metadata', value: this.state.portableMetadata },
+        ...this.state.snapshots.map((snapshot, index) => ({ name: `snapshot:${index}`, value: snapshot }))
+      ]
+    });
+    await this.writeAtomicBuffer(this.libraryFile, payload);
     this.libraryLoaded = true;
+    this.libraryNeedsMigration = false;
   }
 
   async saveState() { await this.enqueueSave(() => this.writeAtomic(this.file, this.persistedState())); }

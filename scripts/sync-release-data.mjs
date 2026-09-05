@@ -6,7 +6,7 @@ import { analyzeCurrentSet } from '../src/domain/analysis.mjs';
 import { ANALYSIS_VERSION } from '../src/domain/composition.mjs';
 import { PBE_SET_18_DATASET, datasetIdentity } from '../src/domain/dataset.mjs';
 import { ITEM_TAXONOMY_VERSION } from '../src/domain/item-taxonomy.mjs';
-import { createDataPack, parseDataPack } from '../src/persistence/data-pack.mjs';
+import { createDataPack, DATA_PACK_VERSION, parseDataPack } from '../src/persistence/data-pack.mjs';
 
 const sourceFile = resolve(process.env.TFTTOOL_RELEASE_DATA_PACK || join(dataDirectory, 'publisher', 'latest-export.tftpack'));
 const outputFile = resolve(process.argv[2] || 'seed/latest-snapshot.tftpack');
@@ -31,7 +31,16 @@ if (!await exists(sourceFile)) {
   if (!pbe || pbe.observations.length !== PBE_TARGET_OBSERVATIONS
     || existing.metadata.datasets?.[PBE_SET_18_DATASET]?.es_ES?.itemTaxonomyVersion !== ITEM_TAXONOMY_VERSION
     || existing.metadata.datasets?.[PBE_SET_18_DATASET]?.en_US?.itemTaxonomyVersion !== ITEM_TAXONOMY_VERSION) throw new Error('The committed PBE dataset or metadata is incomplete.');
-  console.log(JSON.stringify({ source: 'committed-seed', outputFile, datasets: existing.snapshots.map((snapshot) => ({ id: datasetIdentity(snapshot), observations: snapshot.observations.length })) }));
+  let migrated = false;
+  if (existing.manifest.version !== DATA_PACK_VERSION) {
+    const pack = createDataPack({ snapshots: existing.snapshots, metadata: existing.metadata, appVersion: APP_VERSION });
+    const currentManifest = await exists(manifestFile) ? JSON.parse(await readFile(manifestFile, 'utf8')) : {};
+    const manifest = { ...currentManifest, packBytes: pack.length, packSha256: createHash('sha256').update(pack).digest('hex') };
+    await writeFile(`${outputFile}.tmp`, pack); await rename(`${outputFile}.tmp`, outputFile);
+    await writeFile(`${manifestFile}.tmp`, JSON.stringify(manifest), 'utf8'); await rename(`${manifestFile}.tmp`, manifestFile);
+    migrated = true;
+  }
+  console.log(JSON.stringify({ source: 'committed-seed', outputFile, migrated, dataPackVersion: DATA_PACK_VERSION, datasets: existing.snapshots.map((snapshot) => ({ id: datasetIdentity(snapshot), observations: snapshot.observations.length })) }));
   process.exit(0);
 }
 

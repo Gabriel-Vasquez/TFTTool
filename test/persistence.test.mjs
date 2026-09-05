@@ -4,9 +4,11 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { LocalStore } from '../src/persistence/store.mjs';
 import { importBundledSnapshot } from '../src/persistence/seed.mjs';
 import { createDataPack } from '../src/persistence/data-pack.mjs';
+import { isChunkedJson } from '../src/persistence/chunked-json.mjs';
 
 const publishableSnapshot = (id, createdAt) => ({
   id,
@@ -30,6 +32,26 @@ test('history snapshots are retained until the user explicitly deletes them', as
   assert.equal(reloaded.state.snapshots.length, 2);
 });
 
+test('legacy local libraries migrate to chunked storage without deleting history or metadata', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'tfttool-store-library-migration-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const snapshots = [publishableSnapshot('legacy-one', '2026-08-19T00:00:00.000Z'), publishableSnapshot('legacy-two', '2026-08-20T00:00:00.000Z')];
+  const portableMetadata = { es_ES: { version: '16.16.1' }, en_US: { version: '16.16.1' } };
+  await writeFile(join(directory, 'library.json.gz'), gzipSync(JSON.stringify({ format: 'tfttool-local-library', version: 1, snapshots, portableMetadata })));
+
+  const store = new LocalStore(directory);
+  await store.load();
+  assert.deepEqual(store.state.snapshots, snapshots);
+  assert.deepEqual(store.state.portableMetadata, portableMetadata);
+  await store.saveLibrary();
+  assert.equal(isChunkedJson(await readFile(join(directory, 'library.json.gz'))), true);
+
+  const reloaded = new LocalStore(directory);
+  await reloaded.load();
+  assert.deepEqual(reloaded.state.snapshots, snapshots);
+  assert.deepEqual(reloaded.state.portableMetadata, portableMetadata);
+});
+
 test('concurrent local mutations serialize atomic state writes', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'tfttool-store-concurrent-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -44,7 +66,7 @@ test('concurrent local mutations serialize atomic state writes', async (t) => {
   assert.equal(saved.settings.language, 'en');
   assert.equal(saved.snapshots, undefined);
   assert.ok((await readFile(join(directory, 'state.json'))).length < 10_000);
-  assert.ok((await readFile(join(directory, 'library.json.gz'))).length > 0);
+  assert.equal(isChunkedJson(await readFile(join(directory, 'library.json.gz'))), true);
   assert.equal(saved.refreshCheckpoint, null);
   const checkpoint = JSON.parse(await readFile(join(directory, 'refresh-checkpoint.json'), 'utf8'));
   assert.ok(checkpoint.startedAt);

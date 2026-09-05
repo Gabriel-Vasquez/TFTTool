@@ -58,7 +58,7 @@ test('isolated service serves health, bootstrap, UI, and icon end to end', async
   const { url } = await startIsolatedServer(t);
   assert.deepEqual(await (await fetch(`${url}/api/health`)).json(), { ok: true, service: 'tfttool' });
   const bootstrap = await (await fetch(`${url}/api/bootstrap`)).json();
-  assert.equal(bootstrap.appVersion, '0.6.31');
+  assert.equal(bootstrap.appVersion, '0.6.32');
   assert.equal(bootstrap.settings.language, 'es');
   assert.equal(bootstrap.settings.layout, 'standard');
   assert.deepEqual(bootstrap.datasets.map((dataset) => dataset.id), ['set-18-live', 'set-18-pbe', 'set-17-live']);
@@ -71,7 +71,7 @@ test('isolated service serves health, bootstrap, UI, and icon end to end', async
   assert.equal(refresh.newObservations, 0);
   assert.equal(refresh.progressPercent, 0);
   assert.equal(bootstrap.appUpdate.state, 'idle');
-  assert.equal((await (await fetch(`${url}/api/app-update`)).json()).currentVersion, '0.6.31');
+  assert.equal((await (await fetch(`${url}/api/app-update`)).json()).currentVersion, '0.6.32');
   const defaultAnalysis = await (await fetch(`${url}/api/analysis`)).json();
   assert.equal(defaultAnalysis.dataset.id, 'set-18-live');
   assert.equal(defaultAnalysis.result.observations, 24_000);

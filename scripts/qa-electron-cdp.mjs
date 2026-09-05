@@ -41,17 +41,17 @@ function command(method, params = {}) {
   });
 }
 
-await command('Runtime.evaluate', { expression: `document.querySelector('#settings-dialog')?.close(); document.querySelector('[data-tab="home"]')?.click()` });
+await command('Runtime.evaluate', { expression: `document.querySelector('#settings-dialog')?.close(); document.querySelector('[data-tab="home"]')?.click(); document.querySelector('[data-source="live"]')?.click()` });
 
 let initialLive;
 deadline = Date.now() + 30_000;
 while (Date.now() < deadline) {
-  const evaluated = await command('Runtime.evaluate', { expression: `({ set:document.querySelector('#set-filter')?.value, source:document.querySelector('[data-source].active')?.dataset.source, liveHasData:document.querySelector('[data-source="live"]')?.classList.contains('has-data'), pbeHasData:document.querySelector('[data-source="pbe"]')?.classList.contains('has-data'), cards:document.querySelectorAll('.comp-card').length, empty:document.querySelector('.empty')?.innerText||'' })`, returnByValue: true });
+  const evaluated = await command('Runtime.evaluate', { expression: `({ set:document.querySelector('#set-filter')?.value, source:document.querySelector('[data-source].active')?.dataset.source, liveHasData:document.querySelector('[data-source="live"]')?.classList.contains('has-data'), pbeHasData:document.querySelector('[data-source="pbe"]')?.classList.contains('has-data'), cards:document.querySelectorAll('.comp-card').length, observations:document.querySelector('.snapshot-meta .metric strong')?.textContent, empty:document.querySelector('.empty')?.innerText||'' })`, returnByValue: true });
   initialLive = evaluated.result.value;
-  if (initialLive.set === '18' && initialLive.source === 'live' && initialLive.cards === 0) break;
+  if (initialLive.set === '18' && initialLive.source === 'live' && initialLive.cards > 0) break;
   await new Promise((resolve) => setTimeout(resolve, 100));
 }
-if (initialLive?.set !== '18' || initialLive.source !== 'live' || initialLive.liveHasData || !initialLive.pbeHasData || initialLive.cards !== 0 || !/No hay datos|No data/i.test(initialLive.empty)) throw new Error(`Set 18 did not default explicitly to empty Live data: ${JSON.stringify(initialLive)}`);
+if (initialLive?.set !== '18' || initialLive.source !== 'live' || !initialLive.liveHasData || !initialLive.pbeHasData || initialLive.cards < 1 || !/^24[.,]000$/.test(initialLive.observations)) throw new Error(`Set 18 did not default to its complete Live dataset: ${JSON.stringify(initialLive)}`);
 await command('Runtime.evaluate', { expression: `document.querySelector('[data-source="pbe"]')?.click()` });
 
 let state;
@@ -82,7 +82,7 @@ while (Date.now() < deadline) {
   const evaluated = await command('Runtime.evaluate', { expression: `(() => { const visible=(selector)=>[...document.querySelectorAll(selector)].filter((entry)=>{const bounds=entry.getBoundingClientRect();return bounds.bottom>0&&bounds.top<innerHeight}); const champions=visible('.champion-portrait'); const items=visible('.champion-item'); const selector=document.querySelector('#set-filter'); return { set:selector?.value, sets:[...selector?.options||[]].map((option)=>option.value), setLabel:document.querySelector('.set-filter span')?.textContent, inactiveSourceColor:getComputedStyle(document.querySelector('[data-source="live"]')).color, optionColor:getComputedStyle(selector?.options?.[0]).color, optionBackground:getComputedStyle(selector?.options?.[0]).backgroundColor, source:document.querySelector('[data-source].active')?.dataset.source, eyebrow:document.querySelector('.eyebrow')?.textContent, cards:document.querySelectorAll('.comp-card').length, observations:document.querySelector('.snapshot-meta .metric strong')?.textContent, visibleChampionImages:champions.length, loadedChampionImages:champions.filter((image)=>image.complete&&image.naturalWidth>0).length, setScopedChampionImages:champions.filter((image)=>image.src.toLowerCase().includes('/tft18_')).length, visibleItemImages:items.length, loadedItemImages:items.filter((image)=>image.complete&&image.naturalWidth>0).length, width:document.documentElement.scrollWidth, viewport:document.documentElement.clientWidth }; })()`, returnByValue: true });
   if (!evaluated.result?.value) throw new Error(`PBE visual-state evaluation failed: ${JSON.stringify(evaluated.exceptionDetails || evaluated)}`);
   pbeDataset = evaluated.result.value;
-  if (pbeDataset.visibleChampionImages > 0 && pbeDataset.loadedChampionImages === pbeDataset.visibleChampionImages && pbeDataset.visibleItemImages > 0 && pbeDataset.loadedItemImages === pbeDataset.visibleItemImages) break;
+  if (pbeDataset.source === 'pbe' && pbeDataset.set === '18' && pbeDataset.visibleChampionImages > 0 && pbeDataset.loadedChampionImages === pbeDataset.visibleChampionImages && pbeDataset.visibleItemImages > 0 && pbeDataset.loadedItemImages === pbeDataset.visibleItemImages) break;
   await new Promise((resolve) => setTimeout(resolve, 100));
 }
 if (pbeDataset.set !== '18' || pbeDataset.source !== 'pbe' || pbeDataset.sets.length !== 1 || pbeDataset.sets[0] !== '18' || pbeDataset.setLabel !== 'Set · PBE' || pbeDataset.inactiveSourceColor !== 'rgb(203, 211, 225)' || pbeDataset.optionColor !== 'rgb(245, 217, 129)' || pbeDataset.optionBackground !== 'rgb(21, 26, 37)' || !/PBE/.test(pbeDataset.eyebrow) || !/^24[.,]000$/.test(pbeDataset.observations) || pbeDataset.cards < 1 || pbeDataset.visibleChampionImages < 1 || pbeDataset.loadedChampionImages !== pbeDataset.visibleChampionImages || pbeDataset.setScopedChampionImages !== pbeDataset.visibleChampionImages || pbeDataset.visibleItemImages < 1 || pbeDataset.loadedItemImages !== pbeDataset.visibleItemImages || pbeDataset.width > pbeDataset.viewport) throw new Error(`Set 18 PBE did not load with its own readable set selector, complete dataset, and portraits: ${JSON.stringify(pbeDataset)}`);
@@ -94,8 +94,8 @@ await command('Runtime.evaluate', { expression: `document.querySelector('[data-s
 deadline = Date.now() + 30_000;
 while (Date.now() < deadline) {
   const evaluated = await command('Runtime.evaluate', { expression: `({ set:document.querySelector('#set-filter')?.value, source:document.querySelector('[data-source].active')?.dataset.source, cards:document.querySelectorAll('.comp-card').length })`, returnByValue: true });
-  const emptyLive = evaluated.result.value;
-  if (emptyLive.set === '18' && emptyLive.source === 'live' && emptyLive.cards === 0) break;
+  const currentLive = evaluated.result.value;
+  if (currentLive.set === '18' && currentLive.source === 'live' && currentLive.cards > 0) break;
   await new Promise((resolve) => setTimeout(resolve, 100));
 }
 await command('Runtime.evaluate', { expression: `(() => { const selector=document.querySelector('#set-filter'); selector.value='17'; selector.dispatchEvent(new Event('change',{bubbles:true})); })()` });

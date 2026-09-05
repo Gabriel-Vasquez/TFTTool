@@ -19,7 +19,7 @@ export async function importBundledSnapshot(store, file = bundledSnapshotFile, m
           return store.state.bundledSnapshotHashes?.[entry.snapshotId] === manifest.packSha256 && saved?.observations?.length === entry.observations;
         });
         if (verified) {
-          if (!store.libraryLoaded) await store.save();
+          if (!store.libraryLoaded || store.libraryNeedsMigration) await store.save();
           return { imported: false, reason: 'already_verified' };
         }
       }
